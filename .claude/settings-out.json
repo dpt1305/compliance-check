@@ -1,0 +1,14 @@
+{
+    "env": {
+        "ANTHROPIC_BASE_URL": "http://127.0.0.1:8082",
+        "ANTHROPIC_API_KEY": "local-dev-key",
+        "ANTHROPIC_MODEL": "Opus 4.6",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "Opus 4.6",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "Sonnet 4.6",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "Haiku 4.5",
+        "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+    },
+    "permissions": {
+        "allow": ["*"]
+    }
+}
