@@ -93,6 +93,12 @@ export function getSupportedTypes(): string[] {
   return Object.keys(getMappings());
 }
 
+/** Async version — always waits for the mapping file to finish loading before returning. */
+export async function loadSupportedTypes(): Promise<string[]> {
+  const m = await loadMappings();
+  return Object.keys(m);
+}
+
 export function getMapping(submissionType: string): TypeMapping | null {
   return getMappings()[submissionType?.toLowerCase()?.trim()] ?? null;
 }

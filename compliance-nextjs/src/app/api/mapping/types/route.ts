@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
-import { getSupportedTypes } from '@/lib/services/excel-mapping';
+import { loadSupportedTypes } from '@/lib/services/excel-mapping';
+
+// Force dynamic — types must be resolved at request time, not pre-rendered at build
+export const dynamic = 'force-dynamic';
 
 export async function GET(): Promise<NextResponse> {
-  return NextResponse.json({ types: getSupportedTypes() });
+  const types = await loadSupportedTypes();
+  return NextResponse.json({ types });
 }
