@@ -45,6 +45,7 @@ OPTION B — Trellix (fallback if no SEED Dashboard):
 4. TRELLIX STATUS — Trellix showing "trellix status: ok" or "turned on" + "no action needed"
 
 ALSO EXTRACT: device serial number and device name visible anywhere in the screenshot.
+seedDashboard counter values MUST be plain integers (e.g. 4, 19, 0) — no units or labels.
 
 For each checklist item set to false, add a clear description to "failedChecks" explaining exactly what is missing or wrong.
 If confidence < 100, every reason for uncertainty must appear in "failedChecks".
