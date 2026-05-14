@@ -1,6 +1,8 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import ExcelJS from 'exceljs';
 import { findAll } from '@/lib/storage/json-storage';
-import { readTrackingRows, matchesTrackingRow } from '@/lib/services/tracking-reader';
+import { readTrackingRows, matchesTrackingRow, buildColumnMap, cellText } from '@/lib/services/tracking-reader';
+import { existingTrackingPath } from '@/lib/utils/tracking-path';
 
 export interface UserListEntry {
   // Source: 'tracking' | 'submission' | 'both'
@@ -143,4 +145,211 @@ export async function GET(): Promise<NextResponse> {
   }
 
   return NextResponse.json(entries);
+}
+
+interface AddMemberBody {
+  project?: string;
+  name?: string;
+  email?: string;
+  serial?: string;
+  account?: string;
+  deviceType?: string;
+  trackingStatus?: string;
+}
+
+interface UpdateMemberBody {
+  rowNum?: number;
+  project?: string;
+  name?: string;
+  email?: string;
+  serial?: string;
+  account?: string;
+  deviceType?: string;
+  trackingStatus?: string;
+}
+
+function trimValue(v: unknown): string {
+  return typeof v === 'string' ? v.trim() : '';
+}
+
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function nextNo(sheet: ExcelJS.Worksheet, noCol: number): number {
+  if (noCol < 1) return Math.max(sheet.rowCount, 1);
+  let maxNo = 0;
+  sheet.eachRow((row, rowNum) => {
+    if (rowNum === 1) return;
+    const n = Number(cellText(row, noCol));
+    if (!isNaN(n) && n > maxNo) maxNo = n;
+  });
+  return maxNo + 1;
+}
+
+function setCellIfPresent(row: ExcelJS.Row, col: number, value: string | number): void {
+  if (col > 0) row.getCell(col).value = value;
+}
+
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  try {
+    const body = await req.json() as AddMemberBody;
+    const name = trimValue(body.name);
+    if (!name) {
+      return NextResponse.json({ message: 'Name is required' }, { status: 400 });
+    }
+
+    const email = trimValue(body.email);
+    if (email && !isValidEmail(email)) {
+      return NextResponse.json({ message: 'Email is invalid' }, { status: 400 });
+    }
+
+    const filePath = existingTrackingPath();
+    if (!filePath) {
+      return NextResponse.json({ message: 'Tracking file not found on server' }, { status: 404 });
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(filePath);
+    const sheet = workbook.worksheets[0];
+    if (!sheet) {
+      return NextResponse.json({ message: 'Tracking sheet is missing' }, { status: 500 });
+    }
+    const cols = buildColumnMap(sheet);
+    const autoNo = nextNo(sheet, cols.no);
+
+    const row = sheet.addRow([]);
+    setCellIfPresent(row, cols.no, autoNo);
+    setCellIfPresent(row, cols.project, trimValue(body.project));
+    setCellIfPresent(row, cols.name, name);
+    setCellIfPresent(row, cols.email, email);
+    setCellIfPresent(row, cols.serial, trimValue(body.serial));
+    setCellIfPresent(row, cols.account, trimValue(body.account));
+    setCellIfPresent(row, cols.type, trimValue(body.deviceType));
+    setCellIfPresent(row, cols.malwareAlerts, '');
+    setCellIfPresent(row, cols.complianceChecks, '');
+    setCellIfPresent(row, cols.seedConfig, '');
+    setCellIfPresent(row, cols.os, '');
+    setCellIfPresent(row, cols.followUp, '');
+    setCellIfPresent(row, cols.response, '');
+    setCellIfPresent(row, cols.status, trimValue(body.trackingStatus) || 'PENDING');
+    row.commit();
+
+    await workbook.xlsx.writeFile(filePath);
+
+    return NextResponse.json({
+      message: 'Member added successfully',
+      rowNum: row.number,
+    }, { status: 201 });
+  } catch (err) {
+    console.error('[user-list-add-member] Failed:', (err as Error).message);
+    return NextResponse.json({ message: 'Failed to add member' }, { status: 500 });
+  }
+}
+
+export async function PUT(req: NextRequest): Promise<NextResponse> {
+  try {
+    const body = await req.json() as UpdateMemberBody;
+    const rowNum = Number(body.rowNum);
+    if (!rowNum || rowNum < 2) {
+      return NextResponse.json({ message: 'Valid rowNum is required' }, { status: 400 });
+    }
+
+    const name = body.name !== undefined ? trimValue(body.name) : undefined;
+    if (name !== undefined && !name) {
+      return NextResponse.json({ message: 'Name cannot be empty' }, { status: 400 });
+    }
+
+    const email = body.email !== undefined ? trimValue(body.email) : undefined;
+    if (email !== undefined && email && !isValidEmail(email)) {
+      return NextResponse.json({ message: 'Email is invalid' }, { status: 400 });
+    }
+
+    const filePath = existingTrackingPath();
+    if (!filePath) {
+      return NextResponse.json({ message: 'Tracking file not found on server' }, { status: 404 });
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(filePath);
+    const sheet = workbook.worksheets[0];
+    if (!sheet) {
+      return NextResponse.json({ message: 'Tracking sheet is missing' }, { status: 500 });
+    }
+
+    if (rowNum > sheet.rowCount) {
+      return NextResponse.json({ message: `Tracking row not found: ${rowNum}` }, { status: 404 });
+    }
+
+    const cols = buildColumnMap(sheet);
+    const row = sheet.getRow(rowNum);
+    if (!cellText(row, cols.name)) {
+      return NextResponse.json({ message: `Tracking row not found: ${rowNum}` }, { status: 404 });
+    }
+
+    if (body.project !== undefined)      setCellIfPresent(row, cols.project, trimValue(body.project));
+    if (name !== undefined)              setCellIfPresent(row, cols.name, name);
+    if (email !== undefined)             setCellIfPresent(row, cols.email, email);
+    if (body.serial !== undefined)       setCellIfPresent(row, cols.serial, trimValue(body.serial));
+    if (body.account !== undefined)      setCellIfPresent(row, cols.account, trimValue(body.account));
+    if (body.deviceType !== undefined)   setCellIfPresent(row, cols.type, trimValue(body.deviceType));
+    if (body.trackingStatus !== undefined) setCellIfPresent(row, cols.status, trimValue(body.trackingStatus));
+
+    row.commit();
+    await workbook.xlsx.writeFile(filePath);
+
+    return NextResponse.json({ message: 'Member updated successfully', rowNum });
+  } catch (err) {
+    console.error('[user-list-update-member] Failed:', (err as Error).message);
+    return NextResponse.json({ message: 'Failed to update member' }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest): Promise<NextResponse> {
+  try {
+    const rowNum = Number(req.nextUrl.searchParams.get('rowNum'));
+    if (!rowNum || rowNum < 2) {
+      return NextResponse.json({ message: 'Valid rowNum is required' }, { status: 400 });
+    }
+
+    const filePath = existingTrackingPath();
+    if (!filePath) {
+      return NextResponse.json({ message: 'Tracking file not found on server' }, { status: 404 });
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(filePath);
+    const sheet = workbook.worksheets[0];
+    if (!sheet) {
+      return NextResponse.json({ message: 'Tracking sheet is missing' }, { status: 500 });
+    }
+
+    if (rowNum > sheet.rowCount) {
+      return NextResponse.json({ message: `Tracking row not found: ${rowNum}` }, { status: 404 });
+    }
+
+    const cols = buildColumnMap(sheet);
+    const row = sheet.getRow(rowNum);
+    if (!cellText(row, cols.name)) {
+      return NextResponse.json({ message: `Tracking row not found: ${rowNum}` }, { status: 404 });
+    }
+
+    sheet.spliceRows(rowNum, 1);
+
+    if (cols.no > 0) {
+      for (let i = 2; i <= sheet.rowCount; i++) {
+        const current = sheet.getRow(i);
+        if (cellText(current, cols.name)) {
+          current.getCell(cols.no).value = i - 1;
+          current.commit();
+        }
+      }
+    }
+
+    await workbook.xlsx.writeFile(filePath);
+    return NextResponse.json({ message: 'Member deleted successfully', rowNum });
+  } catch (err) {
+    console.error('[user-list-delete-member] Failed:', (err as Error).message);
+    return NextResponse.json({ message: 'Failed to delete member' }, { status: 500 });
+  }
 }

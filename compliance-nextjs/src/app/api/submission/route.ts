@@ -73,6 +73,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // AI validation
     const aiResult = await validateImage(imageBytes, imageFile.type, submissionType);
+    const confidence = Number(aiResult.confidence ?? 0);
+    const hasPerfectConfidence = Number.isFinite(confidence) && confidence === 100;
 
     // Post-AI cross-validation: serial extracted from image must belong to THIS account's row
     if (trackingRows.length > 0) {
@@ -109,13 +111,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
     }
 
-    // If AI validation failed, return result without saving image or record
-    if (!aiResult.valid || !aiResult.matchesType) {
+    // If AI validation failed (or confidence is below 100), return result without saving image or record
+    if (!aiResult.valid || !aiResult.matchesType || !hasPerfectConfidence) {
+      const rejectionResult = !hasPerfectConfidence
+        ? {
+          ...aiResult,
+          valid: false,
+          reason: `Confidence ${confidence}% is below the required 100%. Please submit a clearer image.`,
+          failedChecks: [...(aiResult.failedChecks ?? []), 'AI confidence must be exactly 100%'],
+          guidelines: [...(aiResult.guidelines ?? []), 'Retake the screenshot/image with all required details clearly visible'],
+        }
+        : aiResult;
+
       return NextResponse.json({
         account,
         submissionType,
         status: 'REJECTED',
-        validationResult: JSON.stringify(aiResult),
+        validationResult: JSON.stringify(rejectionResult),
       });
     }
 

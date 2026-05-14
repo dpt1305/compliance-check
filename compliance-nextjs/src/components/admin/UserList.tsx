@@ -45,11 +45,27 @@ interface UserListEntry {
 
 interface EditFields {
   status: string;
+  project: string;
+  name: string;
+  email: string;
+  serial: string;
+  account: string;
+  deviceType: string;
+  trackingStatus: string;
   malwareAlerts: string;
   complianceChecks: string;
   seedConfiguration: string;
   operatingSystem: string;
   followUpAction: string;
+}
+
+interface AddMemberFields {
+  project: string;
+  name: string;
+  email: string;
+  serial: string;
+  account: string;
+  deviceType: string;
   trackingStatus: string;
 }
 
@@ -127,12 +143,23 @@ export default function UserList() {
   // Edit modal
   const [editRow, setEditRow]       = useState<UserListEntry | null>(null);
   const [editFields, setEditFields] = useState<EditFields>({
-    status: '', malwareAlerts: '', complianceChecks: '',
-    seedConfiguration: '', operatingSystem: '', followUpAction: '', trackingStatus: '',
+    status: '', project: '', name: '', email: '', serial: '', account: '', deviceType: '', trackingStatus: '',
+    malwareAlerts: '', complianceChecks: '', seedConfiguration: '', operatingSystem: '', followUpAction: '',
   });
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [imgZoom, setImgZoom]       = useState(1);
   const imgContainerRef = useRef<HTMLDivElement>(null);
+  const [showAddMemberModal, setShowAddMemberModal] = useState(false);
+  const [isSavingMember, setIsSavingMember] = useState(false);
+  const [addMemberFields, setAddMemberFields] = useState<AddMemberFields>({
+    project: '',
+    name: '',
+    email: '',
+    serial: '',
+    account: '',
+    deviceType: '',
+    trackingStatus: 'PENDING',
+  });
 
   // Non-passive wheel listener for zoom (must be attached via useEffect — React onWheel is passive)
   useEffect(() => {
@@ -244,17 +271,27 @@ export default function UserList() {
     setImgZoom(1);
     setEditFields({
       status:           row.submissionStatus && row.submissionStatus !== 'NOT_SUBMITTED' ? row.submissionStatus : 'PENDING',
+      project:          row.project ?? '',
+      name:             row.name ?? '',
+      email:            row.email ?? '',
+      serial:           row.serial ?? '',
+      account:          row.trackingAccount ?? row.account ?? '',
+      deviceType:       row.deviceType ?? row.submissionType ?? '',
+      trackingStatus:   row.trackingStatus   ?? '',
       malwareAlerts:    row.malwareAlerts    ?? '',
       complianceChecks: row.complianceChecks ?? '',
       seedConfiguration:row.seedConfiguration ?? '',
       operatingSystem:  row.operatingSystem  ?? '',
       followUpAction:   row.followUpAction   ?? '',
-      trackingStatus:   row.trackingStatus   ?? '',
     });
   }
 
   async function saveEdit() {
     if (!editRow) return;
+    if (editRow.trackingRowNum && !editFields.name.trim()) {
+      showToast('Name is required', false);
+      return;
+    }
     setIsSavingEdit(true);
     try {
       const jobs: Promise<Response>[] = [];
@@ -270,6 +307,21 @@ export default function UserList() {
 
       // 2. Update tracking.xlsx row
       if (editRow.trackingRowNum) {
+        jobs.push(fetch('/api/admin/user-list', {
+          method: 'PUT',
+          headers: authHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({
+            rowNum:         editRow.trackingRowNum,
+            project:        editFields.project,
+            name:           editFields.name,
+            email:          editFields.email,
+            serial:         editFields.serial,
+            account:        editFields.account,
+            deviceType:     editFields.deviceType,
+            trackingStatus: editFields.trackingStatus,
+          }),
+        }));
+
         jobs.push(fetch('/api/admin/tracking', {
           method: 'PUT',
           headers: authHeaders({ 'Content-Type': 'application/json' }),
@@ -280,7 +332,6 @@ export default function UserList() {
             seedConfiguration:editFields.seedConfiguration,
             operatingSystem:  editFields.operatingSystem,
             followUpAction:   editFields.followUpAction,
-            trackingStatus:   editFields.trackingStatus,
           }),
         }));
       }
@@ -296,12 +347,18 @@ export default function UserList() {
         return {
           ...r,
           submissionStatus: editRow.submissionId ? editFields.status : r.submissionStatus,
-          malwareAlerts:    editFields.malwareAlerts    || r.malwareAlerts,
-          complianceChecks: editFields.complianceChecks || r.complianceChecks,
-          seedConfiguration:editFields.seedConfiguration || r.seedConfiguration,
-          operatingSystem:  editFields.operatingSystem  || r.operatingSystem,
-          followUpAction:   editFields.followUpAction   || r.followUpAction,
-          trackingStatus:   editFields.trackingStatus   || r.trackingStatus,
+          project:          editFields.project,
+          name:             editFields.name,
+          email:            editFields.email,
+          serial:           editFields.serial,
+          trackingAccount:  editFields.account,
+          deviceType:       editFields.deviceType,
+          malwareAlerts:    editFields.malwareAlerts,
+          complianceChecks: editFields.complianceChecks,
+          seedConfiguration:editFields.seedConfiguration,
+          operatingSystem:  editFields.operatingSystem,
+          followUpAction:   editFields.followUpAction,
+          trackingStatus:   editFields.trackingStatus,
         };
       }));
 
@@ -327,6 +384,68 @@ export default function UserList() {
       ));
       showToast('Submission deleted', true);
     } catch { showToast('Failed to delete', false); }
+  }
+
+  async function deleteMember(entry: UserListEntry) {
+    if (!entry.trackingRowNum) return;
+    if (!confirm(`Delete member "${entry.name}" from tracking list?`)) return;
+    try {
+      const res = await fetch(`/api/admin/user-list?rowNum=${entry.trackingRowNum}`, {
+        method: 'DELETE',
+        headers: authHeaders(),
+      });
+      const body = await res.json() as { message?: string };
+      if (!res.ok) {
+        showToast(body.message ?? 'Failed to delete member', false);
+        return;
+      }
+      showToast('Member deleted from tracking list', true);
+      await loadData();
+    } catch {
+      showToast('Failed to delete member', false);
+    }
+  }
+
+  function openAddMember() {
+    setAddMemberFields({
+      project: '',
+      name: '',
+      email: '',
+      serial: '',
+      account: '',
+      deviceType: '',
+      trackingStatus: 'PENDING',
+    });
+    setShowAddMemberModal(true);
+  }
+
+  async function saveNewMember() {
+    if (!addMemberFields.name.trim()) {
+      showToast('Name is required', false);
+      return;
+    }
+
+    setIsSavingMember(true);
+    try {
+      const res = await fetch('/api/admin/user-list', {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(addMemberFields),
+      });
+      const body = await res.json() as { message?: string };
+      if (!res.ok) {
+        showToast(body.message ?? 'Failed to add member', false);
+        return;
+      }
+
+      setShowAddMemberModal(false);
+      showToast('Member added successfully', true);
+      await loadData();
+    } catch {
+      showToast('Failed to add member', false);
+    } finally {
+      setIsSavingMember(false);
+    }
   }
 
   // ── Upload ──────────────────────────────────────────────────────────────────
@@ -427,6 +546,45 @@ export default function UserList() {
         </div>
       )}
 
+      {/* Add member modal */}
+      {showAddMemberModal && (
+        <div className="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4" onClick={() => setShowAddMemberModal(false)}>
+          <div className="bg-white rounded-lg shadow-2xl w-full max-w-xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+              <h2 className="font-semibold text-gray-900">Add New Member</h2>
+              <button onClick={() => setShowAddMemberModal(false)} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">×</button>
+            </div>
+            <div className="px-5 py-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {[
+                { key: 'project', label: 'Project' },
+                { key: 'name', label: 'Name *' },
+                { key: 'email', label: 'Email' },
+                { key: 'serial', label: 'Serial' },
+                { key: 'account', label: 'Account' },
+                { key: 'deviceType', label: 'Type' },
+                { key: 'trackingStatus', label: 'Tracking Status' },
+              ].map(({ key, label }) => (
+                <div key={key} className="form-field">
+                  <label className="form-label">{label}</label>
+                  <input
+                    className="form-input"
+                    value={addMemberFields[key as keyof AddMemberFields]}
+                    onChange={e => setAddMemberFields(f => ({ ...f, [key]: e.target.value }))}
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2 px-5 py-3 border-t border-gray-100">
+              <button onClick={() => setShowAddMemberModal(false)} className="btn-secondary">Cancel</button>
+              <button onClick={saveNewMember} disabled={isSavingMember} className="btn-primary flex items-center gap-2">
+                {isSavingMember && <span className="spinner w-4 h-4 border-white border-t-transparent"></span>}
+                Save Member
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Edit modal */}
       {editRow && (() => {
         const imgUrl = relativeImageUrl(editRow.imageUrl);
@@ -457,12 +615,30 @@ export default function UserList() {
                       </div>
                     )}
                     {[
+                      { key: 'project',        label: 'Project' },
+                      { key: 'name',           label: 'Name *' },
+                      { key: 'email',          label: 'Email' },
+                      { key: 'serial',         label: 'Serial' },
+                      { key: 'account',        label: 'Account' },
+                      { key: 'deviceType',     label: 'Type' },
+                      { key: 'trackingStatus', label: 'Tracking Status' },
+                    ].map(({ key, label }) => (
+                      <div key={key} className="form-field">
+                        <label className="form-label">{label}</label>
+                        <input
+                          className="form-input"
+                          value={editFields[key as keyof EditFields]}
+                          onChange={e => setEditFields(f => ({ ...f, [key]: e.target.value }))}
+                          disabled={!editRow.trackingRowNum}
+                        />
+                      </div>
+                    ))}
+                    {[
                       { key: 'malwareAlerts',     label: 'Malware Alerts'    },
                       { key: 'complianceChecks',  label: 'Compliance Checks' },
                       { key: 'seedConfiguration', label: 'SEED Configuration'},
                       { key: 'operatingSystem',   label: 'Operating System'  },
                       { key: 'followUpAction',    label: 'Follow Up Action'  },
-                      { key: 'trackingStatus',    label: 'Tracking Status'   },
                     ].map(({ key, label }) => (
                       <div key={key} className="form-field">
                         <label className="form-label">{label}</label>
@@ -593,6 +769,13 @@ export default function UserList() {
 
       {/* Toolbar row 2: actions */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
+        <button
+          onClick={openAddMember}
+          className="btn-primary flex items-center gap-1.5 text-sm"
+          title="Add new member to tracking.xlsx"
+        >
+          ➕ Add Member
+        </button>
         <input ref={uploadRef} type="file" accept=".xlsx" className="hidden" onChange={handleUpload} />
         <button
           onClick={() => uploadRef.current?.click()}
@@ -733,6 +916,9 @@ export default function UserList() {
                 <td>
                   <div className="flex gap-1">
                     <button onClick={() => openEdit(row)} className="btn-icon text-primary-600" title="Edit">✏️</button>
+                    {row.trackingRowNum && (
+                      <button onClick={() => deleteMember(row)} className="btn-icon text-amber-700" title="Delete member">🧾</button>
+                    )}
                     {row.submissionId && (
                       <button onClick={() => deleteSubmission(row)} className="btn-icon text-red-600" title="Delete submission">🗑️</button>
                     )}
