@@ -1,0 +1,17 @@
+{
+  "version": "0.29.0",
+  "environments": [
+    "github"
+  ],
+  "phases": [
+    "requirements",
+    "design",
+    "planning",
+    "implementation",
+    "testing",
+    "deployment",
+    "monitoring"
+  ],
+  "createdAt": "2026-05-14T09:07:24.425Z",
+  "updatedAt": "2026-05-14T09:09:57.382Z"
+}

@@ -14,15 +14,26 @@ export interface Submission {
   status: SubmissionStatus;
   validationResult: string;
   validationChecklist?: string;
+  // Windows-specific checks
   hasClock?: boolean;
   hasWindowsUpdate?: boolean;
   hasDeviceName?: boolean;
   hasDeviceSerial?: boolean;
   hasDashboard?: boolean;
+  // Mac-specific checks
   hasSeedDashboard?: boolean;
   hasTrellix?: boolean;
   hasTimestamp?: boolean;
   hasMacInfo?: boolean;
+  // Thin-client specific checks
+  hasThinVirusThreatProtection?: boolean;
+  hasThinAccountProtection?: boolean;
+  hasThinFirewallNetworkProtection?: boolean;
+  hasThinAppBrowserControl?: boolean;
+  hasThinDeviceSecurity?: boolean;
+  hasThinDevicePerformanceHealth?: boolean;
+  hasThinWindowsUpdate?: boolean;
+  hasThinSerialNumber?: boolean;
   confidenceScore?: number;
   // SEED / Trellix values extracted by AI
   malwareAlerts?: string;

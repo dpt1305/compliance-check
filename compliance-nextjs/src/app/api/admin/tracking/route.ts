@@ -19,93 +19,206 @@ function isXlsxBuffer(buf: Buffer): boolean {
     buf[2] === 0x03 && buf[3] === 0x04;
 }
 
+interface FilteredMember {
+  no: number;
+  name: string;
+  trackingRowNum?: number;
+  account?: string;
+  submissionId?: number;
+}
+
+interface FilteredExportBody {
+  month?: number;
+  year?: number;
+  members: FilteredMember[];
+}
+
+/** Sanitize a name for use in a filename — preserves spaces. */
+function sanitizeName(name: string): string {
+  return name
+    .replace(/[^\w\s\u00C0-\u024F\u1E00-\u1EFF-]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+    .slice(0, 60);
+}
+
 /**
  * GET /api/admin/tracking
- *   - No params  → download tracking.xlsx
- *   - ?month=4&year=2026 → download ZIP: tracking_Month_Year.xlsx + images/
+ *   - Always download the full tracking.xlsx
+ *   - Filtered ZIP exports are handled exclusively by POST
  */
-export async function GET(req: NextRequest): Promise<NextResponse> {
-  const params  = req.nextUrl.searchParams;
-  const monthP  = params.get('month');
-  const yearP   = params.get('year');
-  const month   = monthP ? parseInt(monthP, 10) : NaN;
-  const year    = yearP  ? parseInt(yearP,  10) : NaN;
-  const hasDate = !isNaN(month) && !isNaN(year) && month >= 1 && month <= 12 && year > 0;
-
+export async function GET(_req: NextRequest): Promise<NextResponse> {
   const filePath = existingTrackingPath();
 
-  if (!hasDate) {
-    // Plain xlsx download
-    if (!filePath) return NextResponse.json({ message: 'Tracking file not found on server' }, { status: 404 });
-    const buf = fs.readFileSync(filePath);
-    return new NextResponse(buf as unknown as BodyInit, {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': `attachment; filename="${path.basename(filePath)}"`,
-        'Content-Length': String(buf.length),
-      },
-    });
-  }
+  if (!filePath) return NextResponse.json({ message: 'Tracking file not found on server' }, { status: 404 });
 
-  // ZIP download: tracking.xlsx + images from that month/year
-  const monthName = MONTH_NAMES[month - 1];
-  const baseName  = `tracking_${monthName}_${year}`;
-  const zip = new AdmZip();
-
-  // Add tracking.xlsx if present
-  if (filePath) {
-    zip.addFile(`${baseName}.xlsx`, fs.readFileSync(filePath));
-  }
-
-  // Add images for submissions from that month/year
-  const submissions = findAll().filter(s => {
-    if (!s.submissionDate) return false;
-    const d = new Date(s.submissionDate);
-    return d.getMonth() + 1 === month && d.getFullYear() === year;
-  });
-
-  for (const sub of submissions) {
-    if (!sub.imageSavedName) continue;
-    const imgBuf = await getImageBuffer(sub.imageSavedName);
-    if (imgBuf) zip.addFile(`images/${sub.imageSavedName}`, imgBuf);
-  }
-
-  const zipBuf = zip.toBuffer();
-  return new NextResponse(zipBuf as unknown as BodyInit, {
+  const buf = fs.readFileSync(filePath);
+  return new NextResponse(buf as unknown as BodyInit, {
     status: 200,
     headers: {
-      'Content-Type': 'application/zip',
-      'Content-Disposition': `attachment; filename="${baseName}.zip"`,
-      'Content-Length': String(zipBuf.length),
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${path.basename(filePath)}"`,
+      'Content-Length': String(buf.length),
     },
   });
 }
 
-/** POST /api/admin/tracking — replace tracking.xlsx with uploaded file */
+/**
+ * POST /api/admin/tracking
+ *   - multipart/form-data  → replace tracking.xlsx with uploaded file (existing behavior)
+ *   - application/json     → filtered ZIP export: { month?, year?, members: [...] }
+ */
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  const contentType = req.headers.get('content-type') ?? '';
+
+  if (contentType.includes('multipart/form-data')) {
+    try {
+      const formData = await req.formData();
+      const file = formData.get('file') as File | null;
+      if (!file) return NextResponse.json({ message: 'No file provided' }, { status: 400 });
+
+      const name = file.name.toLowerCase();
+      if (!name.endsWith('.xlsx') && !name.endsWith('.xls')) {
+        return NextResponse.json({ message: 'Only .xlsx files are accepted' }, { status: 400 });
+      }
+
+      const buf = Buffer.from(await file.arrayBuffer());
+      if (!isXlsxBuffer(buf)) {
+        return NextResponse.json({ message: 'File does not appear to be a valid Excel (.xlsx) file' }, { status: 400 });
+      }
+
+      const dest = trackingFilePath();
+      const dir  = path.dirname(dest);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(dest, buf);
+
+      return NextResponse.json({ message: 'Tracking file updated successfully', path: path.basename(dest), size: buf.length });
+    } catch (err) {
+      console.error('[tracking-upload] Failed:', (err as Error).message);
+      return NextResponse.json({ message: 'Upload failed' }, { status: 500 });
+    }
+  }
+
   try {
-    const formData = await req.formData();
-    const file = formData.get('file') as File | null;
-    if (!file) return NextResponse.json({ message: 'No file provided' }, { status: 400 });
+    const body = await req.json() as FilteredExportBody;
+    const { month, year, members } = body;
 
-    const name = file.name.toLowerCase();
-    if (!name.endsWith('.xlsx') && !name.endsWith('.xls'))
-      return NextResponse.json({ message: 'Only .xlsx files are accepted' }, { status: 400 });
+    if (!members || !Array.isArray(members) || members.length === 0) {
+      return NextResponse.json({ message: 'No members provided' }, { status: 400 });
+    }
 
-    const buf = Buffer.from(await file.arrayBuffer());
-    if (!isXlsxBuffer(buf))
-      return NextResponse.json({ message: 'File does not appear to be a valid Excel (.xlsx) file' }, { status: 400 });
+    const hasDate = month !== undefined && year !== undefined &&
+      !isNaN(month) && !isNaN(year) && month >= 1 && month <= 12 && year > 0;
 
-    const dest = trackingFilePath();
-    const dir  = path.dirname(dest);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(dest, buf);
+    const monthName = hasDate ? MONTH_NAMES[month - 1] : 'export';
+    const baseName  = hasDate ? `tracking_${monthName}_${year}` : 'tracking_export';
+    const zip = new AdmZip();
 
-    return NextResponse.json({ message: 'Tracking file updated successfully', path: path.basename(dest), size: buf.length });
+    const filePath = existingTrackingPath();
+    if (filePath) {
+      const sourceWb = new ExcelJS.Workbook();
+      await sourceWb.xlsx.readFile(filePath);
+      const sourceSheet = sourceWb.worksheets[0];
+      const cols = buildColumnMap(sourceSheet);
+
+      const outWb = new ExcelJS.Workbook();
+      const outSheet = outWb.addWorksheet('Sheet1');
+
+      const headerRow = sourceSheet.getRow(1);
+      const maxCol = sourceSheet.columnCount || 20;
+      const outHeader = outSheet.addRow([]);
+      for (let c = 1; c <= maxCol; c++) {
+        const cell = headerRow.getCell(c);
+        outHeader.getCell(c).value = cell.value;
+        outHeader.getCell(c).font = cell.font;
+        outHeader.getCell(c).fill = cell.fill as ExcelJS.Fill;
+        outHeader.getCell(c).border = cell.border;
+      }
+      outHeader.commit();
+
+      const memberRowNumSet = new Set(members.filter(m => m.trackingRowNum).map(m => m.trackingRowNum as number));
+      const rowNumToMember = new Map(members.filter(m => m.trackingRowNum).map(m => [m.trackingRowNum as number, m]));
+
+      sourceSheet.eachRow((srcRow, rowNum) => {
+        if (rowNum === 1) return;
+        if (!memberRowNumSet.has(rowNum)) return;
+
+        const member = rowNumToMember.get(rowNum);
+        if (!member) return;
+
+        const outRow = outSheet.addRow([]);
+        for (let c = 1; c <= maxCol; c++) {
+          const srcCell = srcRow.getCell(c);
+          const outCell = outRow.getCell(c);
+          if (c === cols.no) {
+            outCell.value = member.no;
+          } else {
+            outCell.value = srcCell.value;
+          }
+          outCell.font = srcCell.font;
+          outCell.fill = srcCell.fill as ExcelJS.Fill;
+          outCell.border = srcCell.border;
+        }
+        outRow.commit();
+      });
+
+      for (let c = 1; c <= maxCol; c++) {
+        const srcCol = sourceSheet.getColumn(c);
+        const outCol = outSheet.getColumn(c);
+        if (srcCol.width) outCol.width = srcCol.width;
+      }
+
+      const xlsxBuf = await outWb.xlsx.writeBuffer();
+      zip.addFile(`${baseName}.xlsx`, Buffer.from(xlsxBuf));
+    }
+
+    const allSubmissions = findAll();
+    const submissionById = new Map(allSubmissions.map(s => [s.id, s]));
+
+    const periodSubs = hasDate
+      ? allSubmissions.filter(s => {
+          if (!s.submissionDate) return false;
+          const d = new Date(s.submissionDate);
+          return d.getMonth() + 1 === month && d.getFullYear() === year;
+        })
+      : allSubmissions;
+    const periodSubsByAccount = new Map(periodSubs.map(s => [s.account?.toLowerCase() ?? '', s]));
+    const periodSubsById = new Map(periodSubs.map(s => [s.id, s]));
+
+    for (const member of members) {
+      let sub = member.submissionId
+        ? periodSubsById.get(member.submissionId) ?? submissionById.get(member.submissionId)
+        : undefined;
+
+      if (!sub && member.account) {
+        sub = periodSubsByAccount.get(member.account.toLowerCase());
+      }
+
+      if (!sub?.imageSavedName) continue;
+
+      const imgBuf = await getImageBuffer(sub.imageSavedName);
+      if (!imgBuf) continue;
+
+      const ext = path.extname(sub.imageSavedName).toLowerCase() || '.png';
+      const nn  = String(member.no).padStart(2, '0');
+      const safeName = sanitizeName(member.name) || `member_${nn}`;
+      const fileName = `${nn}_${safeName}${ext}`;
+
+      zip.addFile(`images/${fileName}`, imgBuf);
+    }
+
+    const zipBuf = zip.toBuffer();
+    return new NextResponse(zipBuf as unknown as BodyInit, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': `attachment; filename="${baseName}.zip"`,
+        'Content-Length': String(zipBuf.length),
+      },
+    });
   } catch (err) {
-    console.error('[tracking-upload] Failed:', (err as Error).message);
-    return NextResponse.json({ message: 'Upload failed' }, { status: 500 });
+    console.error('[tracking-export] Failed:', (err as Error).message);
+    return NextResponse.json({ message: 'Export failed' }, { status: 500 });
   }
 }
 

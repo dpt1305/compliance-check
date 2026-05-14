@@ -61,16 +61,30 @@ Result: valid=true if Trellix shows ok.
 Respond ONLY with valid JSON (no markdown):
 {"valid":true,"matchesType":true,"confidence":85,"reason":"...","checklist":{"hasSeedDashboard":true,"hasTrellix":false,"hasTimestamp":true,"hasMacInfo":true},"failedChecks":[],"guidelines":[],"suggestion":null}`;
 
-const THIN_PROMPT = `You are a compliance image validator for thin client device verification.
+const THIN_PROMPT = `You are a compliance image validator for thin client (Windows) device verification.
 
-Thin clients run Windows. The submitted screenshot MUST satisfy:
-1. WINDOWS ENVIRONMENT — Shows a Windows desktop/taskbar
-2. TRELLIX STATUS — Trellix visible showing "ok" status
+The submitted screenshot(s) MUST satisfy ALL of the following checks:
 
-Both checks must pass for valid=true.
+WINDOWS SECURITY SCREEN — check each item on the Windows Security home screen:
+1. VIRUS_THREAT_PROTECTION    — "Virus & threat protection" shows a green tick (no current threats)
+2. ACCOUNT_PROTECTION         — "Account protection" shows a green tick
+3. FIREWALL_NETWORK_PROTECTION— "Firewall & network protection" shows a green tick
+4. APP_BROWSER_CONTROL        — "App & browser control" shows a green tick
+5. DEVICE_SECURITY            — "Device security" shows a green tick
+6. DEVICE_PERFORMANCE_HEALTH  — "Device performance & health" shows "No action needed"
+
+WINDOWS UPDATE SCREEN:
+7. WINDOWS_UPDATE — Windows Update screen shows "Up to date" or "You're up to date"
+
+TERMINAL / COMMAND LINE:
+8. SERIAL_NUMBER — A terminal window (PowerShell, CMD, or similar) is visible showing the device serial number output from a command such as Get-CimInstance Win32_BIOS, wmic bios get serialnumber, or equivalent
+
+ALL 8 checks must pass for valid=true. If any one fails, set valid=false and list it in failedChecks.
+
+ALSO EXTRACT: the device serial number text visible in the terminal output.
 
 Respond ONLY with valid JSON (no markdown):
-{"valid":true,"matchesType":true,"confidence":85,"reason":"...","checklist":{"hasTrellix":true},"failedChecks":[],"guidelines":[],"suggestion":null}`;
+{"valid":true,"matchesType":true,"confidence":85,"reason":"...","deviceSerial":"extracted-serial-or-null","checklist":{"hasVirusThreatProtection":true,"hasAccountProtection":true,"hasFirewallNetworkProtection":true,"hasAppBrowserControl":true,"hasDeviceSecurity":true,"hasDevicePerformanceHealth":true,"hasWindowsUpdate":true,"hasSerialNumber":true},"failedChecks":[],"guidelines":[],"suggestion":null}`;
 
 function selectPrompt(expectedType: string): string {
   const t = expectedType.toLowerCase();

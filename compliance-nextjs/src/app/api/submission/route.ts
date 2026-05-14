@@ -73,6 +73,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // AI validation
     const aiResult = await validateImage(imageBytes, imageFile.type, submissionType);
+    const confidence = Number(aiResult.confidence ?? 0);
+    const hasPerfectConfidence = Number.isFinite(confidence) && confidence === 100;
 
     // Post-AI cross-validation: serial extracted from image must belong to THIS account's row
     if (trackingRows.length > 0) {
@@ -109,13 +111,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
     }
 
-    // If AI validation failed, return result without saving image or record
-    if (!aiResult.valid || !aiResult.matchesType) {
+    // If AI validation failed (or confidence is below 100), return result without saving image or record
+    if (!aiResult.valid || !aiResult.matchesType || !hasPerfectConfidence) {
+      const rejectionResult = !hasPerfectConfidence
+        ? {
+          ...aiResult,
+          valid: false,
+          reason: `Confidence ${confidence}% is below the required 100%. Please submit a clearer image.`,
+          failedChecks: [...(aiResult.failedChecks ?? []), 'AI confidence must be exactly 100%'],
+          guidelines: [...(aiResult.guidelines ?? []), 'Retake the screenshot/image with all required details clearly visible'],
+        }
+        : aiResult;
+
       return NextResponse.json({
         account,
         submissionType,
         status: 'REJECTED',
-        validationResult: JSON.stringify(aiResult),
+        validationResult: JSON.stringify(rejectionResult),
       });
     }
 
@@ -159,7 +171,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       submission.hasDeviceSerial = !failedChecks.some(c => c.toLowerCase().includes('serial'));
       submission.hasDashboard = !failedChecks.some(c => c.toLowerCase().includes('dashboard'));
     } else if (submissionType.toLowerCase() === 'thin') {
-      submission.hasTrellix = !failedChecks.some(c => c.toLowerCase().includes('trellix'));
+      const cl = aiResult.checklist ?? {};
+      submission.hasThinVirusThreatProtection   = cl['hasVirusThreatProtection']     ?? !failedChecks.some(c => c.toLowerCase().includes('virus'));
+      submission.hasThinAccountProtection       = cl['hasAccountProtection']         ?? !failedChecks.some(c => c.toLowerCase().includes('account protection'));
+      submission.hasThinFirewallNetworkProtection = cl['hasFirewallNetworkProtection'] ?? !failedChecks.some(c => c.toLowerCase().includes('firewall'));
+      submission.hasThinAppBrowserControl       = cl['hasAppBrowserControl']         ?? !failedChecks.some(c => c.toLowerCase().includes('app') && c.toLowerCase().includes('browser'));
+      submission.hasThinDeviceSecurity          = cl['hasDeviceSecurity']            ?? !failedChecks.some(c => c.toLowerCase().includes('device security'));
+      submission.hasThinDevicePerformanceHealth = cl['hasDevicePerformanceHealth']   ?? !failedChecks.some(c => c.toLowerCase().includes('performance') || c.toLowerCase().includes('health'));
+      submission.hasThinWindowsUpdate           = cl['hasWindowsUpdate']             ?? !failedChecks.some(c => c.toLowerCase().includes('update'));
+      submission.hasThinSerialNumber            = cl['hasSerialNumber']              ?? !failedChecks.some(c => c.toLowerCase().includes('serial'));
+      if (aiResult.deviceSerial) submission.deviceSerial = aiResult.deviceSerial;
     } else if (submissionType.toLowerCase() === 'mac') {
       submission.hasSeedDashboard = !failedChecks.some(c => c.toLowerCase().includes('seed'));
       submission.hasTrellix = !failedChecks.some(c => c.toLowerCase().includes('trellix'));
