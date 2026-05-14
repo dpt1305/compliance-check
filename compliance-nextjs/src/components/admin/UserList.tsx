@@ -222,7 +222,30 @@ export default function UserList() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Filter + period mask
+  // Auto-refresh: poll /api/admin/tracking/version every 15 s (tab-visible only).
+  // fs.stat only — negligible server cost. Silently reloads user list when mtime changes.
+  useEffect(() => {
+    let lastMtime = 0;
+
+    async function checkVersion() {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const res = await fetch('/api/admin/tracking/version', { headers: authHeaders() });
+        if (!res.ok) return;
+        const { mtime } = await res.json() as { mtime: number };
+        if (lastMtime === 0) { lastMtime = mtime; return; }   // seed on first call
+        if (mtime !== lastMtime) {
+          lastMtime = mtime;
+          await loadData();
+        }
+      } catch { /* ignore network errors silently */ }
+    }
+
+    const id = setInterval(checkVersion, 15_000);
+    return () => clearInterval(id);
+  }, [loadData]);
+
+
   useEffect(() => {
     const month = parseInt(filterMonth, 10);
     const year  = parseInt(filterYear,  10);

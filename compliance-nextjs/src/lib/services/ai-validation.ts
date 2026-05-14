@@ -23,6 +23,8 @@ Given an image and an expected type, determine:
 2. Is the image clear, unobstructed, and complete?
 3. Confidence score (0-100)
 
+List EVERY condition that is not fully met in "failedChecks". If confidence < 100, always explain why in "failedChecks".
+
 Respond ONLY with valid JSON (no markdown):
 {"valid":true,"matchesType":true,"confidence":85,"reason":"short explanation","failedChecks":[],"guidelines":[],"suggestion":null}`;
 
@@ -43,6 +45,10 @@ OPTION B — Trellix (fallback if no SEED Dashboard):
 4. TRELLIX STATUS — Trellix showing "trellix status: ok" or "turned on" + "no action needed"
 
 ALSO EXTRACT: device serial number and device name visible anywhere in the screenshot.
+seedDashboard counter values MUST be plain integers (e.g. 4, 19, 0) — no units or labels.
+
+For each checklist item set to false, add a clear description to "failedChecks" explaining exactly what is missing or wrong.
+If confidence < 100, every reason for uncertainty must appear in "failedChecks".
 
 Respond ONLY with valid JSON (no markdown):
 {"valid":true,"matchesType":true,"confidence":85,"reason":"...","deviceSerial":"...","deviceName":"...","seedDashboard":{"malwareAlerts":null,"complianceChecks":null,"seedConfiguration":null,"operatingSystem":null},"checklist":{"hasClock":true,"hasWindowsUpdate":true,"hasDeviceName":true,"hasDeviceSerial":true,"hasDashboard":true},"failedChecks":[],"guidelines":[],"suggestion":null}`;
@@ -57,6 +63,9 @@ Result: valid=true if BOTH present.
 PATH 2 — Trellix Fallback:
 1. TRELLIX — showing "trellix status: ok"
 Result: valid=true if Trellix shows ok.
+
+For each checklist item set to false, add a clear description to "failedChecks" explaining exactly what is missing or wrong.
+If confidence < 100, every reason for uncertainty must appear in "failedChecks".
 
 Respond ONLY with valid JSON (no markdown):
 {"valid":true,"matchesType":true,"confidence":85,"reason":"...","checklist":{"hasSeedDashboard":true,"hasTrellix":false,"hasTimestamp":true,"hasMacInfo":true},"failedChecks":[],"guidelines":[],"suggestion":null}`;
@@ -80,6 +89,8 @@ TERMINAL / COMMAND LINE:
 8. SERIAL_NUMBER — A terminal window (PowerShell, CMD, or similar) is visible showing the device serial number output from a command such as Get-CimInstance Win32_BIOS, wmic bios get serialnumber, or equivalent
 
 ALL 8 checks must pass for valid=true. If any one fails, set valid=false and list it in failedChecks.
+For EVERY checklist item set to false, add a specific description to "failedChecks" explaining exactly what is missing.
+If confidence < 100, every reason for uncertainty must appear in "failedChecks".
 
 ALSO EXTRACT: the device serial number text visible in the terminal output.
 

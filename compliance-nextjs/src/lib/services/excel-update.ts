@@ -7,6 +7,13 @@ function norm(s: string | null | undefined): string {
   return (s ?? '').toLowerCase().trim();
 }
 
+/** Extract the first integer from any string. Returns '0' if none found. */
+function toNumberOnly(s: string | null | undefined): string {
+  if (s === null || s === undefined) return '0';
+  const m = String(s).match(/\d+/);
+  return m ? m[0] : '0';
+}
+
 function matchesDevice(
   extractedSerial: string | null | undefined,
   extractedName: string | null | undefined,
@@ -47,21 +54,18 @@ function extractNumber(text: string, keywords: string[]): string {
     if (idx < 0) continue;
     const after = text.slice(idx + kw.length);
     const numMatch = after.match(/\d+/);
-    if (!numMatch) continue;
-    const numEnd = numMatch.index! + numMatch[0].length;
-    const unitMatch = after.slice(numEnd).match(/^\s+(\w+)/);
-    return unitMatch ? `${numMatch[0]} ${unitMatch[1]}` : numMatch[0];
+    if (numMatch) return numMatch[0];
   }
-  return '0 actions';
+  return '0';
 }
 
 export function buildSeedValues(result: AiValidationResult): [string, string, string, string] {
   if (result.seedDashboard) {
     return [
-      result.seedDashboard.malwareAlerts     ?? '0 actions',
-      result.seedDashboard.complianceChecks  ?? '0 actions',
-      result.seedDashboard.seedConfiguration ?? '0 actions',
-      result.seedDashboard.operatingSystem   ?? '0 actions',
+      toNumberOnly(result.seedDashboard.malwareAlerts),
+      toNumberOnly(result.seedDashboard.complianceChecks),
+      toNumberOnly(result.seedDashboard.seedConfiguration),
+      toNumberOnly(result.seedDashboard.operatingSystem),
     ];
   }
 
@@ -75,7 +79,7 @@ export function buildSeedValues(result: AiValidationResult): [string, string, st
     ];
   }
 
-  return ['Trellix', 'Trellix', 'Trellix', 'Trellix'];
+  return ['0', '0', '0', '0'];
 }
 
 export async function updateTrackingExcel(

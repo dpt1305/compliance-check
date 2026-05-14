@@ -57,6 +57,25 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.1.1] — Pre-release fixes
+
+### Added
+
+- **Tag-based search** (early iteration): admin can type a keyword in the search bar and press **Enter** to add it as a search tag; the table filters in real time matching against all visible fields
+- **Inline member editing on the web**: admin can edit member details (name, email, serial, account, type, project) directly in the browser without touching the Excel file — changes are written back to `tracking.xlsx` on the server immediately
+
+### Changed
+
+- **Exported image filename format** changed from `{No}_{Name}` to **`{SN}_{Full Name}`** (serial number prefix instead of sequence number), making each image file uniquely identifiable by device serial
+- **No. column in filtered ZIP export** reflects the filtered sequence (1, 2, 3…) rather than the original tracking row number, so the exported Excel and image filenames stay in sync
+
+### Fixed
+
+- **Confidence score 100% now correctly passes validation** — previously a score of exactly 100 was mishandled by the comparison logic and could be treated as a failure; the check now accepts `confidence >= threshold`
+- **Submission API response** was returning only a number (the submission ID) instead of a full response object; now returns a structured JSON body with `id`, `status`, and validation result so the frontend can display feedback correctly
+
+---
+
 ## [0.1.0] — Initial release
 
 - User compliance submission form (account, image upload, type selection)
