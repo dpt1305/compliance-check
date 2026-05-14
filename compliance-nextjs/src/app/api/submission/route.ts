@@ -12,6 +12,40 @@ import { existingTrackingPath } from '@/lib/utils/tracking-path';
 
 export const maxDuration = 60;
 
+/** Human-readable label for every structured checklist key the AI can return. */
+const CHECKLIST_LABELS: Record<string, string> = {
+  // Windows
+  hasClock:            'System clock not visible in taskbar bottom-right corner',
+  hasWindowsUpdate:    "Windows Update does not show \"You're up to date\"",
+  hasDeviceName:       'Device name not fully visible (may be truncated)',
+  hasDeviceSerial:     'Device serial number not fully visible (may be truncated)',
+  hasDashboard:        'SEED dashboard not visible or counter values unreadable',
+  hasTrellix:          "Trellix status not visible or not showing \"ok\" / \"turned on\"",
+  // Mac
+  hasSeedDashboard:    'SEED dashboard with device name, serial, and 4+ counters not visible',
+  hasTimestamp:        'System timestamp not visible in top-right corner',
+  hasMacInfo:          'Mac system info (model name + serial) not visible',
+  // Thin
+  hasVirusThreatProtection:     "Virus & threat protection does not show a green tick",
+  hasAccountProtection:         "Account protection does not show a green tick",
+  hasFirewallNetworkProtection: "Firewall & network protection does not show a green tick",
+  hasAppBrowserControl:         "App & browser control does not show a green tick",
+  hasDeviceSecurity:            "Device security does not show a green tick",
+  hasDevicePerformanceHealth:   "Device performance & health does not show \"No action needed\"",
+  hasSerialNumber:              'Terminal output showing serial number not visible',
+};
+
+/**
+ * Given the AI's structured checklist (key → boolean), return an array of
+ * human-readable descriptions for every item that is false/missing.
+ */
+function deriveFailedChecks(checklist: Record<string, boolean> | undefined): string[] {
+  if (!checklist) return [];
+  return Object.entries(checklist)
+    .filter(([, passed]) => !passed)
+    .map(([key]) => CHECKLIST_LABELS[key] ?? key);
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const formData = await req.formData();
@@ -113,15 +147,30 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // If AI validation failed (or confidence is below 100), return result without saving image or record
     if (!aiResult.valid || !aiResult.matchesType || !hasPerfectConfidence) {
-      const rejectionResult = !hasPerfectConfidence
-        ? {
-          ...aiResult,
-          valid: false,
-          reason: `Confidence ${confidence}% is below the required 100%. Please submit a clearer image.`,
-          failedChecks: [...(aiResult.failedChecks ?? []), 'AI confidence must be exactly 100%'],
-          guidelines: [...(aiResult.guidelines ?? []), 'Retake the screenshot/image with all required details clearly visible'],
-        }
-        : aiResult;
+      // Derive structured failed checks from the checklist boolean map
+      const checklistFailed = deriveFailedChecks(aiResult.checklist as Record<string, boolean> | undefined);
+
+      // Merge: checklist-derived items first (structured), then any extra items AI returned
+      const aiFailedChecks = aiResult.failedChecks ?? [];
+      const mergedFailedChecks = [
+        ...checklistFailed,
+        ...aiFailedChecks.filter(c => !checklistFailed.some(f => f.toLowerCase().includes(c.toLowerCase().slice(0, 10)))),
+      ];
+
+      // If confidence < 100 but checklist all passed, add a generic clarity note
+      if (!hasPerfectConfidence && mergedFailedChecks.length === 0) {
+        mergedFailedChecks.push(`Image clarity or completeness below required threshold (${confidence}% confidence — 100% required)`);
+      }
+
+      const rejectionResult = {
+        ...aiResult,
+        valid: false,
+        reason: !hasPerfectConfidence && aiResult.valid
+          ? `Confidence ${confidence}% is below the required 100%. Please check the conditions listed below and retake your screenshot.`
+          : (aiResult.reason || 'Image did not meet compliance requirements.'),
+        failedChecks: mergedFailedChecks,
+        guidelines: aiResult.guidelines ?? [],
+      };
 
       return NextResponse.json({
         account,
