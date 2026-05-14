@@ -117,6 +117,10 @@ export default function DashboardForm() {
     e.preventDefault();
     if (!account.trim() || !submissionType || !file || fileError || fileValidating || isSubmitting) return;
 
+    if (result) {
+      setResult(null);
+    }
+
     setIsSubmitting(true);
     const fd = new FormData();
     fd.append('account', account.trim());
@@ -131,8 +135,6 @@ export default function DashboardForm() {
       setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
       if (data.status === 'APPROVED') {
         showToast('Submission approved!', true);
-        setAccount(''); setSubmissionType(''); setFile(null); setFileTouched(false);
-        if (fileRef.current) fileRef.current.value = '';
       } else {
         showToast('Validation failed. Please fix the issues and try again.', false);
       }

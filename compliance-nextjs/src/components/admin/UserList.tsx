@@ -9,6 +9,14 @@ const MONTH_NAMES = [
   'July','August','September','October','November','December',
 ];
 
+/** All UserListEntry string fields searched by tags — covers every visible column. */
+const SEARCH_KEYS: (keyof UserListEntry)[] = [
+  'name', 'account', 'trackingAccount', 'email', 'serial', 'project',
+  'submissionType', 'deviceType', 'malwareAlerts', 'complianceChecks',
+  'seedConfiguration', 'operatingSystem', 'followUpAction', 'responseFromTicket',
+  'trackingStatus', 'submissionStatus', 'deviceSerial', 'deviceName', 'source',
+];
+
 /** Return the current month (1-12) and year in GMT+7 (Asia/Bangkok, no DST). */
 function gmt7Now(): { month: number; year: number } {
   const d = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Bangkok' }));
@@ -66,7 +74,6 @@ interface AddMemberFields {
   serial: string;
   account: string;
   deviceType: string;
-  trackingStatus: string;
 }
 
 function getToken() { return sessionStorage.getItem('admin_token') ?? ''; }
@@ -133,10 +140,12 @@ export default function UserList() {
   const [showAll, setShowAll] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Filters — default to current month/year in GMT+7
+  // Tag-based search filter
+  const [filterTags,   setFilterTags]   = useState<string[]>([]);
+  const [tagInput,     setTagInput]     = useState('');
+  const tagInputRef = useRef<HTMLInputElement>(null);
+  const [filterType,   setFilterType]   = useState('');
   const { month: nowMonth, year: nowYear } = gmt7Now();
-  const [filterText,   setFilterText]   = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
   const [filterMonth,  setFilterMonth]  = useState(String(nowMonth));
   const [filterYear,   setFilterYear]   = useState(String(nowYear));
 
@@ -158,7 +167,6 @@ export default function UserList() {
     serial: '',
     account: '',
     deviceType: '',
-    trackingStatus: 'PENDING',
   });
 
   // Non-passive wheel listener for zoom (must be attached via useEffect — React onWheel is passive)
@@ -216,7 +224,6 @@ export default function UserList() {
 
   // Filter + period mask
   useEffect(() => {
-    const q     = filterText.trim().toLowerCase();
     const month = parseInt(filterMonth, 10);
     const year  = parseInt(filterYear,  10);
     const hasPeriod = !isNaN(month) && !isNaN(year) && month >= 1 && month <= 12 && year > 0;
@@ -226,28 +233,30 @@ export default function UserList() {
       ? (data.map(e => applyPeriodMask(e, month, year)).filter(Boolean) as UserListEntry[])
       : data;
 
-    // 2. Text search
-    if (q) {
+    // 2. Type filter — PRIORITY: applied before fuzzy search
+    if (filterType) {
       masked = masked.filter(r =>
-        r.name.toLowerCase().includes(q) ||
-        (r.account        ?? '').toLowerCase().includes(q) ||
-        (r.trackingAccount ?? '').toLowerCase().includes(q) ||
-        (r.email          ?? '').toLowerCase().includes(q) ||
-        (r.serial         ?? '').toLowerCase().includes(q) ||
-        (r.project        ?? '').toLowerCase().includes(q) ||
-        (r.submissionType ?? '').toLowerCase().includes(q)
+        (r.deviceType || r.submissionType || '').toLowerCase() === filterType.toLowerCase()
       );
     }
 
-    // 3. Status filter (works on possibly-masked status)
-    if (filterStatus) {
-      masked = masked.filter(r => (r.submissionStatus ?? 'NOT_SUBMITTED') === filterStatus);
+    // 3. Tag search — AND logic: row must contain every tag as a substring (case-insensitive) in any field
+    const activeTags = filterTags.map(t => t.trim().toLowerCase()).filter(Boolean);
+    if (activeTags.length > 0) {
+      masked = masked.filter(row =>
+        activeTags.every(tag =>
+          SEARCH_KEYS.some(key => {
+            const val = row[key];
+            return typeof val === 'string' && val.toLowerCase().includes(tag);
+          })
+        )
+      );
     }
 
     setFiltered(masked);
     setVisibleCount(PAGE_SIZE);
     setShowAll(false);
-  }, [data, filterText, filterStatus, filterMonth, filterYear]);
+  }, [data, filterTags, filterType, filterMonth, filterYear]);
 
   // Infinite scroll
   useEffect(() => {
@@ -414,7 +423,6 @@ export default function UserList() {
       serial: '',
       account: '',
       deviceType: '',
-      trackingStatus: 'PENDING',
     });
     setShowAddMemberModal(true);
   }
@@ -471,25 +479,67 @@ export default function UserList() {
     setIsDownloading(true);
     try {
       const month  = parseInt(filterMonth, 10);
-      const year   = parseInt(filterYear,  10);
+      const year   = parseInt(filterYear, 10);
       const hasP   = !isNaN(month) && !isNaN(year) && month >= 1 && month <= 12 && year > 0;
-      const url    = hasP
-        ? `/api/admin/tracking?month=${month}&year=${year}`
-        : '/api/admin/tracking';
+      const hasText   = filterTags.length > 0;
+      const hasType   = filterType.length > 0;
+      // Any active filter → filtered export via POST
+      const hasAnyFilter = hasText || hasType || hasP;
 
-      const res = await fetch(url, { headers: authHeaders() });
-      if (!res.ok) {
-        const d = await res.json() as { message?: string };
-        showToast(d.message ?? 'Tracking file not found', false);
+      if (!hasAnyFilter) {
+        // No filters at all — return raw tracking.xlsx
+        const res = await fetch('/api/admin/tracking', { headers: authHeaders() });
+        if (!res.ok) {
+          const d = await res.json() as { message?: string };
+          showToast(d.message ?? 'Tracking file not found', false);
+          return;
+        }
+        const blob = await res.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = objectUrl;
+        a.download = 'tracking.xlsx';
+        document.body.appendChild(a); a.click();
+        document.body.removeChild(a); URL.revokeObjectURL(objectUrl);
         return;
       }
-      const blob      = await res.blob();
+
+      // `filtered` is captured from this render's closure — always up-to-date
+      // because handleDownload is a plain function (not useCallback) recreated each render
+      const members = filtered.map((row, idx) => ({
+        no: idx + 1,
+        name: row.name,
+        trackingRowNum: row.trackingRowNum,
+        account: row.trackingAccount ?? row.account,
+        submissionId: row.submissionId,
+      }));
+
+      if (members.length === 0) {
+        showToast('No members match the current filter', false);
+        return;
+      }
+
+      const res = await fetch('/api/admin/tracking', {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          month: hasP ? month : undefined,
+          year:  hasP ? year  : undefined,
+          members,
+        }),
+      });
+      if (!res.ok) {
+        const d = await res.json() as { message?: string };
+        showToast(d.message ?? 'Download failed', false);
+        return;
+      }
+      const blob = await res.blob();
       const objectUrl = URL.createObjectURL(blob);
-      const a         = document.createElement('a');
-      a.href     = objectUrl;
+      const a = document.createElement('a');
+      a.href = objectUrl;
       a.download = hasP
         ? `tracking_${MONTH_NAMES[month - 1]}_${year}.zip`
-        : 'tracking.xlsx';
+        : 'tracking_filtered.zip';
       document.body.appendChild(a); a.click();
       document.body.removeChild(a); URL.revokeObjectURL(objectUrl);
     } catch { showToast('Download failed', false); }
@@ -536,6 +586,11 @@ export default function UserList() {
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
 
+  // Derive distinct Types from loaded data (from tracking deviceType)
+  const availableTypes = Array.from(
+    new Set(data.map(r => r.deviceType || r.submissionType || '').filter(Boolean))
+  ).sort();
+
   return (
     <div className="p-4">
       {/* Toast */}
@@ -562,7 +617,6 @@ export default function UserList() {
                 { key: 'serial', label: 'Serial' },
                 { key: 'account', label: 'Account' },
                 { key: 'deviceType', label: 'Type' },
-                { key: 'trackingStatus', label: 'Tracking Status' },
               ].map(({ key, label }) => (
                 <div key={key} className="form-field">
                   <label className="form-label">{label}</label>
@@ -732,20 +786,56 @@ export default function UserList() {
         <span className="px-3 py-1 rounded-full bg-red-100 text-red-700 text-sm font-medium">Not Submitted: {notSubmittedCount}</span>
       </div>
 
-      {/* Toolbar row 1: search + status + period */}
+      {/* Toolbar row 1: tag search + status + period */}
       <div className="flex flex-wrap items-center gap-2 mb-2">
-        <input
-          className="form-input max-w-[220px]"
-          placeholder="Search name, email, serial…"
-          value={filterText}
-          onChange={e => setFilterText(e.target.value)}
-        />
-        <select className="form-select w-40" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-          <option value="">All statuses</option>
-          <option value="APPROVED">Approved</option>
-          <option value="PENDING">Pending</option>
-          <option value="REJECTED">Rejected</option>
-          <option value="NOT_SUBMITTED">Not Submitted</option>
+        {/* Tag search input */}
+        <div
+          className="flex flex-wrap items-center gap-1 min-h-[38px] px-2 py-1 border border-gray-300 rounded bg-white cursor-text focus-within:ring-2 focus-within:ring-indigo-400 focus-within:border-indigo-400"
+          style={{ minWidth: '220px', maxWidth: '480px' }}
+          onClick={() => tagInputRef.current?.focus()}
+        >
+          {filterTags.map(tag => (
+            <span key={tag} className="flex items-center gap-1 pl-2 pr-1 py-0.5 bg-indigo-100 text-indigo-800 rounded text-xs font-medium whitespace-nowrap">
+              {tag}
+              <button
+                type="button"
+                className="hover:text-red-600 leading-none ml-0.5 text-indigo-500"
+                onClick={e => { e.stopPropagation(); setFilterTags(prev => prev.filter(t => t !== tag)); }}
+                title={`Remove tag "${tag}"`}
+              >×</button>
+            </span>
+          ))}
+          <input
+            ref={tagInputRef}
+            className="flex-1 min-w-[100px] outline-none text-sm bg-transparent py-0.5"
+            placeholder={filterTags.length === 0 ? 'Type and press Enter to search…' : 'Add tag…'}
+            value={tagInput}
+            onChange={e => setTagInput(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                const t = tagInput.trim();
+                if (t && !filterTags.includes(t)) setFilterTags(prev => [...prev, t]);
+                setTagInput('');
+              } else if (e.key === 'Backspace' && tagInput === '' && filterTags.length > 0) {
+                setFilterTags(prev => prev.slice(0, -1));
+              }
+            }}
+          />
+          {(filterTags.length > 0 || tagInput) && (
+            <button
+              type="button"
+              className="ml-1 text-xs text-gray-400 hover:text-red-500 leading-none px-1"
+              title="Clear all tags"
+              onClick={e => { e.stopPropagation(); setFilterTags([]); setTagInput(''); }}
+            >✕</button>
+          )}
+        </div>
+        <select className="form-select w-40" value={filterType} onChange={e => setFilterType(e.target.value)}>
+          <option value="">All types</option>
+          {availableTypes.map(t => (
+            <option key={t} value={t}>{t}</option>
+          ))}
         </select>
 
         {/* Period filter */}
@@ -792,14 +882,16 @@ export default function UserList() {
           disabled={isDownloading}
           className="btn-secondary flex items-center gap-1.5 text-sm"
           title={
-            filterMonth && filterYear
-              ? `Download ZIP: tracking + images for ${MONTH_NAMES[parseInt(filterMonth) - 1]} ${filterYear}`
-              : 'Download tracking.xlsx'
+            filterTags.length > 0 || filterType || filterMonth || filterYear
+              ? `Download filtered ZIP: ${filtered.length} member(s) currently shown`
+              : 'Download full tracking.xlsx (no filters active)'
           }
         >
           {isDownloading
             ? <><span className="spinner w-4 h-4 border-gray-400 border-t-transparent"></span> Downloading…</>
-            : <>📥 {filterMonth && filterYear ? `Download ZIP (${MONTH_NAMES[parseInt(filterMonth) - 1]} ${filterYear})` : 'Download Tracking'}</>}
+            : filterTags.length > 0 || filterType || filterMonth || filterYear
+              ? <>📥 Download Filtered ZIP ({filtered.length})</>
+              : <>📥 Download Tracking</>}
         </button>
         {/* Clear period — only shown when month+year filter is active */}
         {filterMonth && filterYear && (
@@ -862,7 +954,7 @@ export default function UserList() {
             {displayed.length === 0 ? (
               <tr>
                 <td colSpan={15} className="text-center text-gray-500 py-8">
-                  {isLoading ? 'Loading…' : filterText || filterStatus || filterMonth || filterYear
+                  {isLoading ? 'Loading…' : filterTags.length > 0 || filterType || filterMonth || filterYear
                     ? 'No results match the current filters.'
                     : 'No data found.'}
                 </td>
@@ -872,7 +964,7 @@ export default function UserList() {
                 key={row.submissionId ?? `tr-${row.trackingNo ?? idx}`}
                 className={!row.submissionStatus || row.submissionStatus === 'NOT_SUBMITTED' ? 'bg-red-50' : ''}
               >
-                <td className="text-gray-400">{row.trackingNo ?? '—'}</td>
+                <td className="text-gray-400 font-medium">{idx + 1}</td>
                 <td className="text-gray-500 whitespace-nowrap">{row.project ?? '—'}</td>
                 <td className="font-medium whitespace-nowrap">{row.name}</td>
                 <td className="text-gray-500 whitespace-nowrap">{row.trackingAccount || row.account || '—'}</td>

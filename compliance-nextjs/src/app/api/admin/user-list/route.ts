@@ -154,7 +154,6 @@ interface AddMemberBody {
   serial?: string;
   account?: string;
   deviceType?: string;
-  trackingStatus?: string;
 }
 
 interface UpdateMemberBody {
@@ -272,9 +271,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         setCellIfPresent(row, cols.complianceChecks, '');
         setCellIfPresent(row, cols.seedConfig, '');
         setCellIfPresent(row, cols.os, '');
-        setCellIfPresent(row, cols.followUp, '');
-        setCellIfPresent(row, cols.response, '');
-        setCellIfPresent(row, cols.status, trimValue(body.trackingStatus) || 'PENDING');
+        setCellIfPresent(row, cols.followUp, 'Default');
+        setCellIfPresent(row, cols.response, 'Refer photo captured in folder');
+        setCellIfPresent(row, cols.status, 'Ok');
         row.commit();
 
         await workbook.xlsx.writeFile(filePath);

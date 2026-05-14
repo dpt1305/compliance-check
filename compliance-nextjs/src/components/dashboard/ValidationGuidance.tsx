@@ -22,20 +22,36 @@ const MAC_CHECKLIST: GuidanceItem[] = [
   { title: 'Trellix Status (Fallback)', description: 'If no SEED dashboard: Trellix endpoint security showing "trellix status: ok"', icon: '🛡️', required: false },
 ];
 
+const THIN_CHECKLIST: GuidanceItem[] = [
+  { title: 'Virus & threat protection', description: 'Windows Security → "Virus & threat protection" showing a green tick (No current threats)', icon: '🛡️', required: true },
+  { title: 'Account protection', description: 'Windows Security → "Account protection" showing a green tick', icon: '👤', required: true },
+  { title: 'Firewall & network protection', description: 'Windows Security → "Firewall & network protection" showing a green tick', icon: '🔥', required: true },
+  { title: 'App & browser control', description: 'Windows Security → "App & browser control" showing a green tick', icon: '🌐', required: true },
+  { title: 'Device security', description: 'Windows Security → "Device security" showing a green tick', icon: '💻', required: true },
+  { title: 'Device performance & health', description: 'Windows Security → "Device performance & health" showing "No action needed"', icon: '❤️', required: true },
+  { title: 'Windows Update', description: 'Windows Update screen showing "Up to date"', icon: '🔄', required: true },
+  { title: 'Serial Number in Terminal', description: 'Terminal / command prompt (PowerShell, CMD) showing the device serial number — e.g. via Get-CimInstance Win32_BIOS or wmic bios get serialnumber', icon: '#️⃣', required: true },
+];
+
 interface Props {
   submissionType: string | null;
 }
 
 export default function ValidationGuidance({ submissionType }: Props) {
   const type = submissionType?.toLowerCase() ?? '';
-  const checklist = type === 'windows' ? WINDOWS_CHECKLIST : type === 'mac' ? MAC_CHECKLIST : [];
+  const checklist =
+    type === 'windows' ? WINDOWS_CHECKLIST :
+    type === 'mac'     ? MAC_CHECKLIST     :
+    type === 'thin'    ? THIN_CHECKLIST    : [];
 
   if (checklist.length === 0) return null;
 
   const guidanceText =
     type === 'windows'
       ? 'All 5 items above must be visible in your screenshot for approval.'
-      : 'Provide either: (1) SEED dashboard + timestamp, OR (2) System info + timestamp, OR (3) Trellix status showing "ok"';
+      : type === 'thin'
+        ? 'All 8 items above must be present in your screenshot(s) for approval. You may capture multiple screens.'
+        : 'Provide either: (1) SEED dashboard + timestamp, OR (2) System info + timestamp, OR (3) Trellix status showing "ok"';
 
   return (
     <div className="card p-4 border border-blue-100 bg-blue-50">
@@ -85,6 +101,15 @@ export default function ValidationGuidance({ submissionType }: Props) {
               <li>System Preferences &gt; About This Mac shows device name and serial</li>
               <li>You need timestamps to verify device information currency</li>
               <li>Trellix status from System Preferences or security app is acceptable</li>
+            </>
+          )}
+          {type === 'thin' && (
+            <>
+              <li>Open <strong>Windows Security</strong> (Start → Windows Security) and capture the home screen showing all items</li>
+              <li>All six items must show a <strong>green tick</strong> or <strong>&quot;No action needed&quot;</strong></li>
+              <li>Open <strong>Windows Update</strong> (Settings → Windows Update) and capture the &quot;Up to date&quot; screen</li>
+              <li>Open <strong>PowerShell</strong> or <strong>Command Prompt</strong> and run: <code>Get-CimInstance Win32_BIOS | Select-Object SerialNumber</code> or <code>wmic bios get serialnumber</code> — capture the output showing your serial number</li>
+              <li>You may combine all elements into one screenshot or submit separate captures</li>
             </>
           )}
         </ul>
