@@ -23,10 +23,10 @@ jobs:
             cd /home/${{ secrets.EC2_USERNAME }}/compliance-check
             git pull origin main
             cd compliance-nextjs
-            npm ci
+            npm ci --quiet
             if [ -f .env.production ]; then
               export $(grep -v '^#' .env.production | xargs)
             fi
             npm run build
-            pm2 restart compliance-app || pm2 start npm --name "compliance-app" --env production -- run start
+            pm2 restart compliance-app
             
