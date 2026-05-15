@@ -36,4 +36,5 @@ jobs:
             npm run build
             
             # Restart the app with PM2, or start it if it's not running
-            pm2 restart compliance-app || pm2 start npm --name "compliance-app" --env production -- run start
+            pm2 restart compliance-app 
+            
