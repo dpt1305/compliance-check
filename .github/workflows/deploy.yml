@@ -20,7 +20,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set -e
-            cd /home/ubuntu/compliance-app
+            cd /home/${{ secrets.EC2_USERNAME }}/compliance-check
             git pull origin main
             cd compliance-nextjs
             npm ci
