@@ -19,13 +19,14 @@ jobs:
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            cd /home/ubuntu/compliance-app/compliance-nextjs
+            set -e
+            cd /home/ubuntu/compliance-app
             git pull origin main
+            cd compliance-nextjs
             npm ci
-            # Load production env for the build as per EC2-DEPLOY.md
             if [ -f .env.production ]; then
               export $(grep -v '^#' .env.production | xargs)
             fi
             npm run build
-            pm2 restart compliance-app
+            pm2 restart compliance-app || pm2 start npm --name "compliance-app" --env production -- run start
             
