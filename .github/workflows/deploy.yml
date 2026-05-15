@@ -20,13 +20,21 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set -e
+            # Navigate to the project directory
             cd /home/${{ secrets.EC2_USERNAME }}/compliance-check
+            
+            # Pull the latest changes
             git pull origin main
+            
+            # Navigate to the Next.js app directory
             cd compliance-nextjs
+            
+            # Install dependencies (quietly)
             npm ci --quiet
-            if [ -f .env.production ]; then
-              export $(grep -v '^#' .env.production | xargs)
-            fi
+            
+            # Build the project (Next.js loads .env.production automatically)
             npm run build
-            pm2 restart compliance-app
+            
+            # Restart the app with PM2, or start it if it's not running
+            pm2 restart compliance-app 
             
