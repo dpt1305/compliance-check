@@ -1,13 +1,14 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import MultiSelectDropdown from './MultiSelectDropdown';
 
 type Status = 'PENDING' | 'APPROVED' | 'REJECTED';
 type CellStatus = Status | 'MISSING';
 
 interface CheckInEntry {
   account: string; submissionType: string; status: Status;
-  submissionDate: string; imageUrl: string;
+  submissionDate: string; imageUrl: string; project?: string | null;
 }
 
 function getToken() { return sessionStorage.getItem('admin_token') ?? ''; }
@@ -24,7 +25,7 @@ const cellClass: Record<CellStatus, string> = {
 export default function CheckInTable() {
   const [entries, setEntries] = useState<CheckInEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [typeFilter, setTypeFilter] = useState('');
+  const [projectFilter, setProjectFilter] = useState<string[] | null>(null);
   const [statusFilter, setStatusFilter] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -47,16 +48,17 @@ export default function CheckInTable() {
   useEffect(() => { loadData(); }, [loadData]);
 
   const filteredEntries = entries.filter(e => {
-    if (typeFilter && e.submissionType !== typeFilter) return false;
+    if (projectFilter !== null && !projectFilter.includes(e.project ?? '')) return false;
     if (statusFilter && e.status !== statusFilter) return false;
     if (dateFrom && e.submissionDate < dateFrom) return false;
     if (dateTo && e.submissionDate > dateTo + 'T23:59:59') return false;
     return true;
   });
 
-  const accounts = [...new Set(entries.map(e => e.account))].sort();
-  const types = [...new Set(entries.map(e => e.submissionType))].sort();
+  const accounts = [...new Set(filteredEntries.map(e => e.account))].sort();
+  const types = [...new Set(filteredEntries.map(e => e.submissionType))].sort();
   const allTypes = [...new Set(entries.map(e => e.submissionType))].sort();
+  const availableProjects = [...new Set(entries.map(e => e.project ?? '').filter(Boolean))].sort();
 
   const matrix: Record<string, Record<string, CheckInEntry>> = {};
   for (const e of filteredEntries) {
@@ -82,17 +84,20 @@ export default function CheckInTable() {
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3 mb-4">
-        <select className="form-select w-40" value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
-          <option value="">All types</option>
-          {allTypes.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
-        </select>
+        <MultiSelectDropdown
+          options={availableProjects}
+          selected={projectFilter}
+          onChange={setProjectFilter}
+          placeholder="All projects"
+          className="w-48"
+        />
         <select className="form-select w-40" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
           <option value="">All statuses</option>
           {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
         <input type="date" className="form-input w-40" value={dateFrom} onChange={e => setDateFrom(e.target.value)} placeholder="From" />
         <input type="date" className="form-input w-40" value={dateTo} onChange={e => setDateTo(e.target.value)} placeholder="To" />
-        <button onClick={() => { setTypeFilter(''); setStatusFilter(''); setDateFrom(''); setDateTo(''); }} className="btn-secondary text-sm">
+        <button onClick={() => { setProjectFilter(null); setStatusFilter(''); setDateFrom(''); setDateTo(''); }} className="btn-secondary text-sm">
           🧹 Clear
         </button>
         <button onClick={loadData} disabled={isLoading} className="btn-secondary text-sm">

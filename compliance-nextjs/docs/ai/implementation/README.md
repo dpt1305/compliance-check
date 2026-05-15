@@ -59,7 +59,31 @@ src/
 - AWS S3 for optional image object storage + presigned retrieval.
 - Teams incoming webhook for reminder notifications.
 
-## Error Handling
+## Project Filter (User List & Check-in Table)
+
+### Behavior
+- Both **User List** and **Check-in Table** share a `MultiSelectDropdown` component for project filtering.
+- The dropdown shows all distinct project values loaded from `tracking.xlsx`.
+- `selected = null` → **Select All ON** — no filter active, all rows/accounts shown (default state).
+- `selected = []` → **Select All OFF** — nothing is checked; filter produces 0 rows.
+- `selected = ['ProjectA', 'ProjectB']` → filter to those projects only.
+
+### Select All toggle
+- Clicking "Select All" when it is **ON** (all shown) → turns **OFF** (`onChange([])`), unchecking every individual item.
+- Clicking "Select All" when it is **OFF** or partially selected → turns **ON** (`onChange(null)`), checking all items.
+- Checking every individual item manually auto-normalizes back to `null` (Select All ON).
+
+### Check-in Table — project join
+- The check-in API (`GET /api/admin/checkin-table`) joins submission records with tracking rows by `account` to resolve the `project` field.
+- Only accounts that belong to the selected projects appear as rows in the grid.
+- The `accounts` and `types` used to build the grid matrix are derived from `filteredEntries` (post-filter), not the full dataset.
+
+### User List — filter precedence
+1. Month/year period mask applied first.
+2. Project filter applied to the masked result.
+3. Tag (fuzzy) search applied last.
+
+
 - APIs return clear JSON messages for validation/auth failures.
 - AI service logs provider failures and continues fallback.
 - Tracking/Excel update uses guarded writes with explicit server-side logs on failure.
