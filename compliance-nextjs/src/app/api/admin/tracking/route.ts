@@ -3,9 +3,11 @@ import path from 'path';
 import AdmZip from 'adm-zip';
 import { NextRequest, NextResponse } from 'next/server';
 import ExcelJS from 'exceljs';
-import { trackingFilePath, existingTrackingPath } from '@/lib/utils/tracking-path';
-import { buildColumnMap } from '@/lib/services/tracking-reader';
-import { findAll } from '@/lib/storage/json-storage';
+import { trackingFilePath } from '@/lib/utils/tracking-path';
+import { readTrackingRows } from '@/lib/services/tracking-reader';
+import { findAll } from '@/lib/db/submission-repo';
+import { readAll as readTrackingDB, replaceAll, updateSeedFields } from '@/lib/db/tracking-repo';
+import { bumpTrackingVersion } from '@/lib/db/index';
 import { getImageBuffer } from '@/lib/utils/file-storage';
 
 const MONTH_NAMES = [
@@ -44,20 +46,52 @@ function sanitizeName(name: string): string {
 
 /**
  * GET /api/admin/tracking
- *   - Always download the full tracking.xlsx
+ *   - Generate and download tracking.xlsx from DB rows
  *   - Filtered ZIP exports are handled exclusively by POST
  */
 export async function GET(_req: NextRequest): Promise<NextResponse> {
-  const filePath = existingTrackingPath();
+  const rows = readTrackingDB();
+  if (rows.length === 0) {
+    // Fall back to disk file if DB is empty (migration hasn't run yet)
+    const diskPath = trackingFilePath();
+    if (fs.existsSync(diskPath)) {
+      const buf = fs.readFileSync(diskPath);
+      return new NextResponse(buf as unknown as BodyInit, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'Content-Disposition': 'attachment; filename="tracking.xlsx"',
+          'Content-Length': String(buf.length),
+        },
+      });
+    }
+    return NextResponse.json({ message: 'Tracking data not found on server' }, { status: 404 });
+  }
 
-  if (!filePath) return NextResponse.json({ message: 'Tracking file not found on server' }, { status: 404 });
+  // Generate fresh xlsx from DB rows
+  const wb = new ExcelJS.Workbook();
+  const sheet = wb.addWorksheet('Sheet1');
 
-  const buf = fs.readFileSync(filePath);
+  // Header row
+  sheet.addRow(['No', 'Project', 'Name', 'Email', 'Serial', 'Account', 'Device Type',
+    'Malware Alerts', 'Compliance Checks', 'Seed Configuration', 'Operating System',
+    'Follow Up Action', 'Response From Ticket', 'Tracking Status']);
+
+  for (const r of rows) {
+    sheet.addRow([
+      r.no ?? '', r.project ?? '', r.name ?? '', r.email ?? '', r.serial ?? '',
+      r.account ?? '', r.deviceType ?? '', r.malwareAlerts ?? '', r.complianceChecks ?? '',
+      r.seedConfiguration ?? '', r.operatingSystem ?? '', r.followUpAction ?? '',
+      r.responseFromTicket ?? '', r.trackingStatus ?? '',
+    ]);
+  }
+
+  const buf = Buffer.from(await wb.xlsx.writeBuffer());
   return new NextResponse(buf as unknown as BodyInit, {
     status: 200,
     headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'Content-Disposition': `attachment; filename="${path.basename(filePath)}"`,
+      'Content-Disposition': 'attachment; filename="tracking.xlsx"',
       'Content-Length': String(buf.length),
     },
   });
@@ -87,12 +121,33 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         return NextResponse.json({ message: 'File does not appear to be a valid Excel (.xlsx) file' }, { status: 400 });
       }
 
+      // Also save to disk (fallback / backup)
       const dest = trackingFilePath();
       const dir  = path.dirname(dest);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(dest, buf);
 
-      return NextResponse.json({ message: 'Tracking file updated successfully', path: path.basename(dest), size: buf.length });
+      // Parse and import into DB
+      const parsed = await readTrackingRows(dest);
+      replaceAll(parsed.map(r => ({
+        no:                 r.no ?? undefined,
+        project:            r.project || undefined,
+        name:               r.name,
+        email:              r.email || undefined,
+        serial:             r.serial || undefined,
+        account:            r.account || undefined,
+        deviceType:         r.deviceType || undefined,
+        malwareAlerts:      r.malwareAlerts || undefined,
+        complianceChecks:   r.complianceChecks || undefined,
+        seedConfiguration:  r.seedConfiguration || undefined,
+        operatingSystem:    r.operatingSystem || undefined,
+        followUpAction:     r.followUpAction || undefined,
+        responseFromTicket: r.responseFromTicket || undefined,
+        trackingStatus:     r.trackingStatus || undefined,
+      })));
+      bumpTrackingVersion();
+
+      return NextResponse.json({ message: 'Tracking file updated successfully', path: path.basename(dest), size: buf.length, rows: parsed.length });
     } catch (err) {
       console.error('[tracking-upload] Failed:', (err as Error).message);
       return NextResponse.json({ message: 'Upload failed' }, { status: 500 });
@@ -114,62 +169,31 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const baseName  = hasDate ? `tracking_${monthName}_${year}` : 'tracking_export';
     const zip = new AdmZip();
 
-    const filePath = existingTrackingPath();
-    if (filePath) {
-      const sourceWb = new ExcelJS.Workbook();
-      await sourceWb.xlsx.readFile(filePath);
-      const sourceSheet = sourceWb.worksheets[0];
-      const cols = buildColumnMap(sourceSheet);
+    // Build filtered tracking xlsx from DB rows
+    {
+      const allDbRows = readTrackingDB();
+      const memberIdSet = new Set(members.filter(m => m.trackingRowNum).map(m => m.trackingRowNum as number));
+      const idToMember = new Map(members.filter(m => m.trackingRowNum).map(m => [m.trackingRowNum as number, m]));
+      const filteredDbRows = allDbRows.filter(r => memberIdSet.has(r.id));
 
-      const outWb = new ExcelJS.Workbook();
-      const outSheet = outWb.addWorksheet('Sheet1');
-
-      const headerRow = sourceSheet.getRow(1);
-      const maxCol = sourceSheet.columnCount || 20;
-      const outHeader = outSheet.addRow([]);
-      for (let c = 1; c <= maxCol; c++) {
-        const cell = headerRow.getCell(c);
-        outHeader.getCell(c).value = cell.value;
-        outHeader.getCell(c).font = cell.font;
-        outHeader.getCell(c).fill = cell.fill as ExcelJS.Fill;
-        outHeader.getCell(c).border = cell.border;
-      }
-      outHeader.commit();
-
-      const memberRowNumSet = new Set(members.filter(m => m.trackingRowNum).map(m => m.trackingRowNum as number));
-      const rowNumToMember = new Map(members.filter(m => m.trackingRowNum).map(m => [m.trackingRowNum as number, m]));
-
-      sourceSheet.eachRow((srcRow, rowNum) => {
-        if (rowNum === 1) return;
-        if (!memberRowNumSet.has(rowNum)) return;
-
-        const member = rowNumToMember.get(rowNum);
-        if (!member) return;
-
-        const outRow = outSheet.addRow([]);
-        for (let c = 1; c <= maxCol; c++) {
-          const srcCell = srcRow.getCell(c);
-          const outCell = outRow.getCell(c);
-          if (c === cols.no) {
-            outCell.value = member.no;
-          } else {
-            outCell.value = srcCell.value;
-          }
-          outCell.font = srcCell.font;
-          outCell.fill = srcCell.fill as ExcelJS.Fill;
-          outCell.border = srcCell.border;
+      if (filteredDbRows.length > 0) {
+        const outWb = new ExcelJS.Workbook();
+        const outSheet = outWb.addWorksheet('Sheet1');
+        outSheet.addRow(['No', 'Project', 'Name', 'Email', 'Serial', 'Account', 'Device Type',
+          'Malware Alerts', 'Compliance Checks', 'Seed Configuration', 'Operating System',
+          'Follow Up Action', 'Response From Ticket', 'Tracking Status']);
+        for (const r of filteredDbRows) {
+          const m = idToMember.get(r.id);
+          outSheet.addRow([
+            m?.no ?? r.no ?? '', r.project ?? '', r.name ?? '', r.email ?? '',
+            r.serial ?? '', r.account ?? '', r.deviceType ?? '',
+            r.malwareAlerts ?? '', r.complianceChecks ?? '', r.seedConfiguration ?? '',
+            r.operatingSystem ?? '', r.followUpAction ?? '', r.responseFromTicket ?? '', r.trackingStatus ?? '',
+          ]);
         }
-        outRow.commit();
-      });
-
-      for (let c = 1; c <= maxCol; c++) {
-        const srcCol = sourceSheet.getColumn(c);
-        const outCol = outSheet.getColumn(c);
-        if (srcCol.width) outCol.width = srcCol.width;
+        const xlsxBuf = await outWb.xlsx.writeBuffer();
+        zip.addFile(`${baseName}.xlsx`, Buffer.from(xlsxBuf));
       }
-
-      const xlsxBuf = await outWb.xlsx.writeBuffer();
-      zip.addFile(`${baseName}.xlsx`, Buffer.from(xlsxBuf));
     }
 
     const allSubmissions = findAll();
@@ -232,33 +256,24 @@ interface TrackingUpdateBody {
   trackingStatus?: string;
 }
 
-/** PUT /api/admin/tracking — update a single row using dynamic column detection */
+/** PUT /api/admin/tracking — update seed fields on a single tracking row by DB id */
 export async function PUT(req: NextRequest): Promise<NextResponse> {
   try {
     const body = await req.json() as TrackingUpdateBody;
     const { rowNum, malwareAlerts, complianceChecks, seedConfiguration, operatingSystem, followUpAction, trackingStatus } = body;
 
-    if (!rowNum || rowNum < 2) return NextResponse.json({ message: 'Invalid rowNum' }, { status: 400 });
+    if (!rowNum || rowNum < 1) return NextResponse.json({ message: 'Invalid rowNum' }, { status: 400 });
 
-    const filePath = existingTrackingPath();
-    if (!filePath) return NextResponse.json({ message: 'Tracking file not found on server' }, { status: 404 });
+    const ok = updateSeedFields(rowNum, {
+      ...(malwareAlerts    !== undefined && { malwareAlerts }),
+      ...(complianceChecks !== undefined && { complianceChecks }),
+      ...(seedConfiguration!== undefined && { seedConfiguration }),
+      ...(operatingSystem  !== undefined && { operatingSystem }),
+      ...(followUpAction   !== undefined && { followUpAction }),
+      ...(trackingStatus   !== undefined && { trackingStatus }),
+    });
 
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(filePath);
-    const sheet = workbook.worksheets[0];
-    const cols  = buildColumnMap(sheet);
-    const row   = sheet.getRow(rowNum);
-
-    if (malwareAlerts    !== undefined) row.getCell(cols.malwareAlerts).value    = malwareAlerts;
-    if (complianceChecks !== undefined) row.getCell(cols.complianceChecks).value = complianceChecks;
-    if (seedConfiguration!== undefined) row.getCell(cols.seedConfig).value       = seedConfiguration;
-    if (operatingSystem  !== undefined) row.getCell(cols.os).value               = operatingSystem;
-    if (followUpAction   !== undefined) row.getCell(cols.followUp).value         = followUpAction;
-    if (trackingStatus   !== undefined) row.getCell(cols.status).value           = trackingStatus;
-
-    row.commit();
-    await workbook.xlsx.writeFile(filePath);
-
+    if (!ok) return NextResponse.json({ message: `Tracking row not found: ${rowNum}` }, { status: 404 });
     return NextResponse.json({ message: 'Tracking row updated' });
   } catch (err) {
     console.error('[tracking-update] Failed:', (err as Error).message);

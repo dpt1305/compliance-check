@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import MultiSelectDropdown from './MultiSelectDropdown';
+import { useAdminEvents } from '@/hooks/useAdminEvents';
 
 type Status = 'PENDING' | 'APPROVED' | 'REJECTED';
 type CellStatus = Status | 'MISSING';
@@ -46,6 +47,9 @@ export default function CheckInTable() {
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Real-time updates via SSE — reloads whenever tracking or submission data changes.
+  useAdminEvents({ onTracking: loadData, onSubmissions: loadData });
 
   const filteredEntries = entries.filter(e => {
     if (projectFilter !== null && !projectFilter.includes(e.project ?? '')) return false;

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { findAll, deleteByPeriod } from '@/lib/storage/json-storage';
+import { findAll, deleteByPeriod } from '@/lib/db/submission-repo';
 import { deleteImage } from '@/lib/utils/file-storage';
 
 export async function GET(): Promise<NextResponse> {

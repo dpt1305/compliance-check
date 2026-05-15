@@ -4,11 +4,10 @@ import { storeImage, getPublicUrl } from '@/lib/utils/file-storage';
 import { generateSavedName } from '@/lib/utils/image-rename';
 import { isTypeSupported, getAllowedExtensions } from '@/lib/services/excel-mapping';
 import { validateImage } from '@/lib/services/ai-validation';
-import { save } from '@/lib/storage/json-storage';
+import { save } from '@/lib/db/submission-repo';
 import type { Submission } from '@/lib/storage/json-storage';
 import { updateTrackingExcel, buildSeedValues } from '@/lib/services/excel-update';
-import { readTrackingRows, accountInTracking, findRowForAccount } from '@/lib/services/tracking-reader';
-import { existingTrackingPath } from '@/lib/utils/tracking-path';
+import { readAll as readAllTracking, accountInTracking, findRowForAccount } from '@/lib/db/tracking-repo';
 
 export const maxDuration = 60;
 
@@ -20,8 +19,8 @@ const CHECKLIST_LABELS: Record<string, string> = {
   hasDeviceName:       'Device name not fully visible (may be truncated)',
   hasDeviceSerial:     'Device serial number not fully visible (may be truncated)',
   hasDashboard:        'SEED dashboard not visible or counter values unreadable',
-  hasTrellix:          "Trellix status not visible or not showing \"ok\" / \"turned on\"",
   // Mac
+  hasTrellix:          "Trellix status not visible or not showing \"ok\" / \"turned on\"",
   hasSeedDashboard:    'SEED dashboard with device name, serial, and 4+ counters not visible',
   hasTimestamp:        'System timestamp not visible in top-right corner',
   hasMacInfo:          'Mac system info (model name + serial) not visible',
@@ -66,7 +65,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     // Read tracking rows once — reused for both the early account check and post-AI serial check
-    const trackingRows = existingTrackingPath() ? await readTrackingRows() : [];
+    const trackingRows = readAllTracking();
 
     // Early account check — reject immediately if account not in tracking.xlsx (saves AI cost)
     if (trackingRows.length > 0 && !accountInTracking(trackingRows, account)) {
@@ -218,7 +217,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       submission.hasWindowsUpdate = !failedChecks.some(c => c.toLowerCase().includes('update'));
       submission.hasDeviceName = !failedChecks.some(c => c.toLowerCase().includes('device name'));
       submission.hasDeviceSerial = !failedChecks.some(c => c.toLowerCase().includes('serial'));
-      submission.hasDashboard = !failedChecks.some(c => c.toLowerCase().includes('dashboard'));
     } else if (submissionType.toLowerCase() === 'thin') {
       const cl = aiResult.checklist ?? {};
       submission.hasThinVirusThreatProtection   = cl['hasVirusThreatProtection']     ?? !failedChecks.some(c => c.toLowerCase().includes('virus'));

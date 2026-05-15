@@ -1,12 +1,10 @@
 import { NextResponse } from 'next/server';
-import { findAll } from '@/lib/storage/json-storage';
-import { readTrackingRows } from '@/lib/services/tracking-reader';
+import { findAll } from '@/lib/db/submission-repo';
+import { readAll as readTrackingRows } from '@/lib/db/tracking-repo';
 
 export async function GET(): Promise<NextResponse> {
-  const [submissions, trackingRows] = await Promise.all([
-    Promise.resolve(findAll()),
-    readTrackingRows(),
-  ]);
+  const submissions  = findAll();
+  const trackingRows = readTrackingRows();
 
   // Build a map from account → project using tracking data
   const accountToProject = new Map<string, string>();

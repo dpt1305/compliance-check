@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { generateToken, COOKIE_NAME, EXPIRY_SECONDS } from '@/lib/auth/jwt';
-import { findByUsername, initDefaultAdmin } from '@/lib/storage/admin-storage';
+import { findByUsername } from '@/lib/db/admin-repo';
+import { runMigrations } from '@/lib/db/migrate';
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  initDefaultAdmin();
+  await runMigrations();
 
   try {
     const body = await req.json() as { username?: string; password?: string };

@@ -12,7 +12,6 @@ const WINDOWS_CHECKLIST: GuidanceItem[] = [
   { title: 'Windows Update Status', description: "Windows Update screen showing \"You're up to date\"", icon: '🔄', required: true },
   { title: 'Device Name', description: 'Computer hostname fully readable (not truncated) anywhere on screen', icon: '💻', required: true },
   { title: 'Device Serial Number', description: 'Serial number fully readable (not truncated) anywhere on screen', icon: '#️⃣', required: true },
-  { title: 'Security Status', description: 'Trellix, Defender, Intune, or similar showing "ok" or "no action needed" status', icon: '🛡️', required: true },
 ];
 
 const MAC_CHECKLIST: GuidanceItem[] = [
@@ -48,7 +47,7 @@ export default function ValidationGuidance({ submissionType }: Props) {
 
   const guidanceText =
     type === 'windows'
-      ? 'All 5 items above must be visible in your screenshot for approval.'
+      ? 'All 4 items above must be visible in your screenshot for approval.'
       : type === 'thin'
         ? 'All 8 items above must be present in your screenshot(s) for approval. You may capture multiple screens.'
         : 'Provide either: (1) SEED dashboard + timestamp, OR (2) System info + timestamp, OR (3) Trellix status showing "ok"';

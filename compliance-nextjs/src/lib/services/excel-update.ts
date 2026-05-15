@@ -1,7 +1,6 @@
-import ExcelJS from 'exceljs';
 import type { AiValidationResult } from './ai-validation';
-import { existingTrackingPath } from '@/lib/utils/tracking-path';
-import { buildColumnMap, cellText } from './tracking-reader';
+import { readAll, updateSeedFields } from '@/lib/db/tracking-repo';
+import type { TrackingMember } from '@/lib/db/tracking-repo';
 
 function norm(s: string | null | undefined): string {
   return (s ?? '').toLowerCase().trim();
@@ -18,31 +17,23 @@ function matchesDevice(
   extractedSerial: string | null | undefined,
   extractedName: string | null | undefined,
   submissionAccount: string,
-  excelSerial: string,
-  excelName: string,
-  excelEmail: string,
-  excelAccount: string,
+  row: TrackingMember,
 ): boolean {
   const serial = norm(extractedSerial);
   const name   = norm(extractedName);
   const acct   = norm(submissionAccount);
 
-  // Serial match (exact then partial)
-  if (serial && norm(excelSerial) === serial) return true;
-  if (serial && norm(excelSerial).includes(serial)) return true;
+  if (serial && norm(row.serial) === serial) return true;
+  if (serial && norm(row.serial).includes(serial)) return true;
 
-  // Account match: submission account vs tracking account / email / name
   if (acct) {
-    if (excelAccount && norm(excelAccount) === acct) return true;
-    if (excelEmail   && norm(excelEmail)   === acct) return true;
-    if (excelName    && norm(excelName)    === acct) return true;
+    if (row.account && norm(row.account) === acct) return true;
+    if (row.email   && norm(row.email)   === acct) return true;
+    if (row.name    && norm(row.name)    === acct) return true;
   }
 
-  // AI device name vs tracking name
-  if (name && norm(excelName) === name) return true;
-
-  // Serial found inside email column (some sheets embed serial in email)
-  if (serial && norm(excelEmail).includes(serial)) return true;
+  if (name && norm(row.name) === name) return true;
+  if (serial && row.email && norm(row.email).includes(serial)) return true;
 
   return false;
 }
@@ -87,59 +78,30 @@ export async function updateTrackingExcel(
   aiResult: AiValidationResult,
   account: string,
 ): Promise<void> {
-  const filePath = existingTrackingPath();
-  if (!filePath) {
-    console.debug('[excel-update] EXCEL_UPDATE_PATH not configured or file not found, skipping');
-    return;
-  }
-
+  void submissionType; // kept for API compatibility
   const { deviceSerial, deviceName } = aiResult;
   if (!deviceSerial?.trim() && !deviceName?.trim() && !account.trim()) {
     console.warn('[excel-update] No device serial, name, or account to match on, skipping');
     return;
   }
 
-  console.info(`[excel-update] Attempting update — serial="${deviceSerial}" name="${deviceName}" account="${account}" type="${submissionType}"`);
+  console.info(`[excel-update] Attempting DB update — serial="${deviceSerial}" name="${deviceName}" account="${account}"`);
 
   try {
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(filePath);
-    const sheet = workbook.worksheets[0];
-    const cols = buildColumnMap(sheet);
+    const rows = readAll();
+    const match = rows.find(r => matchesDevice(deviceSerial, deviceName, account, r));
 
-    let updated = false;
-
-    sheet.eachRow((row, rowNum) => {
-      if (updated || rowNum === 1) return;
-
-      const excelSerial  = cellText(row, cols.serial);
-      const excelName    = cellText(row, cols.name);
-      const excelEmail   = cellText(row, cols.email);
-      const excelAccount = cellText(row, cols.account);
-
-      if (!matchesDevice(deviceSerial, deviceName, account, excelSerial, excelName, excelEmail, excelAccount)) return;
-
-      const [malwareAlerts, complianceChecks, seedConfig, operatingSystem] = buildSeedValues(aiResult);
-
-      row.getCell(cols.malwareAlerts).value    = malwareAlerts;
-      row.getCell(cols.complianceChecks).value = complianceChecks;
-      row.getCell(cols.seedConfig).value       = seedConfig;
-      row.getCell(cols.os).value               = operatingSystem;
-
-      updated = true;
-      console.info(
-        `[excel-update] Updated row ${rowNum} — serial="${deviceSerial}" name="${deviceName}" account="${account}" ` +
-        `values=[${malwareAlerts}, ${complianceChecks}, ${seedConfig}, ${operatingSystem}]`,
-      );
-    });
-
-    if (updated) {
-      await workbook.xlsx.writeFile(filePath);
-      console.info('[excel-update] tracking.xlsx saved');
-    } else {
+    if (!match) {
       console.warn(`[excel-update] No matching row found for serial="${deviceSerial}" name="${deviceName}" account="${account}"`);
+      return;
     }
+
+    const [malwareAlerts, complianceChecks, seedConfiguration, operatingSystem] = buildSeedValues(aiResult);
+    updateSeedFields(match.id, { malwareAlerts, complianceChecks, seedConfiguration, operatingSystem });
+
+    console.info(`[excel-update] Updated DB row id=${match.id} — values=[${malwareAlerts}, ${complianceChecks}, ${seedConfiguration}, ${operatingSystem}]`);
   } catch (err) {
-    console.error('[excel-update] Failed to update tracking.xlsx:', (err as Error).message);
+    console.error('[excel-update] Failed to update tracking DB:', (err as Error).message);
   }
 }
+
