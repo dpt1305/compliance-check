@@ -374,14 +374,17 @@ src/app/
 - Auto-logout on token expiry
 
 #### User List
-- Table with: `ID | Account | Type | Status | Submission Date | Image Preview | Actions`
+- Table with: `ID | Project | Name | Account | Type | Status | Submission Date | Image Preview | Actions`
 - Inline edit (click cell -> editable input -> save)
-- Bulk select + bulk update
+- **Project filter**: searchable multi-select dropdown (Select All / individual projects with checkboxes) — filters rows by `project` field from tracking.xlsx; empty selection = show all
+- Tag-based search (AND logic), month/year period filter
 
 #### Check-in Table
 - Grid view of all users vs. compliance items
 - Color-coded: Complete / Pending / Missing
-- Filter by: type, status, date range
+- **Project filter**: searchable multi-select dropdown (Select All / individual projects with checkboxes) — filters accounts shown in the grid by project; empty selection = show all
+- Filter by: status, date range
+- `project` field is joined from tracking.xlsx by account at API level
 
 #### Notifications
 - "Send Reminder" button -> calls `POST /api/admin/notify`

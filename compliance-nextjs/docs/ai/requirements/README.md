@@ -37,6 +37,8 @@ Provide a web-based compliance submission and administration system that:
 - As an admin, I upload/replace `tracking.xlsx` and edit tracking values.
 - As an admin, I export reports and trigger reminder notifications.
 - As an admin, I can clear submissions for a specific month/year and remove related images.
+- As an admin, I can filter the User List by **project** using a searchable multi-select dropdown with a true-toggle "Select All" checkbox — selecting no projects shows all rows; deselecting all shows nothing.
+- As an admin, I can filter the Check-in Table by **project** the same way, so only accounts belonging to selected projects appear as rows in the grid.
 - As an admin, I can search the User List with tolerant fuzzy matching across member identity and device fields.
 - As an admin, I can rely on the User List `No.` column to reflect the current filtered ordering I am reviewing.
 - As an admin, I can download a ZIP package that contains only the currently filtered rows and their matching images.
@@ -51,6 +53,8 @@ Provide a web-based compliance submission and administration system that:
 - Export and tracking download endpoints produce valid files.
 - User List text filtering uses Fuse.js fuzzy search across `name`, `account`, `email`, `serial`, `project`, and `submissionType`.
 - The User List `No.` column renders the 1-based position within the current filtered result set, not the original tracking row number.
+- User List project filter uses `null` to mean "no filter" (all shown) and `[]` to mean "none selected" (0 rows); the "Select All" checkbox is a true toggle between these two states.
+- Check-in Table project filter resolves `project` server-side by joining submissions with tracking rows by account; grid rows (accounts) reflect only the filtered projects.
 - ZIP download exports only the currently visible filtered members, including a filtered Excel workbook and only their associated images — regardless of whether the active filter is text search, status, period, or any combination.
 - Submission form keeps previously entered values after a successful APPROVED submission (values are not auto-cleared on success).
 - Submission form clears the previous AI validation result when the user re-submits (stale result is not shown during a new submission attempt).
@@ -74,6 +78,24 @@ Provide a web-based compliance submission and administration system that:
 - Should route-level rate limiting be enforced in middleware/API handlers (env exists but not yet wired)?
 - Should admin credential bootstrap be moved from login-time init to startup/init script?
 - Should additional device types beyond `windows`, `mac`, `thin` be added to mapping defaults?
+
+## Project Filter (User List & Check-in Table)
+
+### Requirement
+Admins need to narrow both the User List table and the Check-in grid to one or more specific projects without losing the ability to quickly reset to "show all".
+
+### Multi-select dropdown spec
+- Searchable dropdown listing all distinct `project` values from `tracking.xlsx`.
+- **Select All** checkbox at the top — a **true toggle**:
+  - ON (default) → no filter, all rows shown.
+  - Click when ON → turns OFF, all individual checkboxes become unchecked.
+  - Click when OFF or partial → turns ON, all items checked, filter cleared.
+- Selecting all items individually auto-snaps "Select All" back to ON.
+- Button label: `All projects` (all ON) · `None selected` (all OFF) · `Project Name` (one selected) · `N selected` (multiple).
+
+### Check-in Table specifics
+- The API resolves `project` by joining submission `account` values against tracking rows — submissions have no project field of their own.
+- Grid rows (accounts) and column types both shrink to match the filtered project set.
 
 ## Newly Added Admin Filtering & Export Features
 ### Fuzzy search in User List

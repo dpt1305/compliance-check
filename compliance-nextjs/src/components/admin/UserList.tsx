@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import MultiSelectDropdown from './MultiSelectDropdown';
 
 const PAGE_SIZE = 20;
 
@@ -144,7 +145,7 @@ export default function UserList() {
   const [filterTags,   setFilterTags]   = useState<string[]>([]);
   const [tagInput,     setTagInput]     = useState('');
   const tagInputRef = useRef<HTMLInputElement>(null);
-  const [filterType,   setFilterType]   = useState('');
+  const [filterProjects, setFilterProjects] = useState<string[] | null>(null);
   const { month: nowMonth, year: nowYear } = gmt7Now();
   const [filterMonth,  setFilterMonth]  = useState(String(nowMonth));
   const [filterYear,   setFilterYear]   = useState(String(nowYear));
@@ -256,10 +257,10 @@ export default function UserList() {
       ? (data.map(e => applyPeriodMask(e, month, year)).filter(Boolean) as UserListEntry[])
       : data;
 
-    // 2. Type filter — PRIORITY: applied before fuzzy search
-    if (filterType) {
+    // 2. Project filter — null = no filter; [] = none selected; [...] = filter to listed projects
+    if (filterProjects !== null) {
       masked = masked.filter(r =>
-        (r.deviceType || r.submissionType || '').toLowerCase() === filterType.toLowerCase()
+        filterProjects.includes(r.project ?? '')
       );
     }
 
@@ -279,7 +280,7 @@ export default function UserList() {
     setFiltered(masked);
     setVisibleCount(PAGE_SIZE);
     setShowAll(false);
-  }, [data, filterTags, filterType, filterMonth, filterYear]);
+  }, [data, filterTags, filterProjects, filterMonth, filterYear]);
 
   // Infinite scroll
   useEffect(() => {
@@ -504,10 +505,10 @@ export default function UserList() {
       const month  = parseInt(filterMonth, 10);
       const year   = parseInt(filterYear, 10);
       const hasP   = !isNaN(month) && !isNaN(year) && month >= 1 && month <= 12 && year > 0;
-      const hasText   = filterTags.length > 0;
-      const hasType   = filterType.length > 0;
+      const hasText       = filterTags.length > 0;
+      const hasProjects   = filterProjects !== null;
       // Any active filter → filtered export via POST
-      const hasAnyFilter = hasText || hasType || hasP;
+      const hasAnyFilter = hasText || hasProjects || hasP;
 
       if (!hasAnyFilter) {
         // No filters at all — return raw tracking.xlsx
@@ -609,9 +610,9 @@ export default function UserList() {
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
 
-  // Derive distinct Types from loaded data (from tracking deviceType)
-  const availableTypes = Array.from(
-    new Set(data.map(r => r.deviceType || r.submissionType || '').filter(Boolean))
+  // Derive distinct Projects from loaded data (from tracking project field)
+  const availableProjects = Array.from(
+    new Set(data.map(r => r.project ?? '').filter(Boolean))
   ).sort();
 
   return (
@@ -854,12 +855,13 @@ export default function UserList() {
             >✕</button>
           )}
         </div>
-        <select className="form-select w-40" value={filterType} onChange={e => setFilterType(e.target.value)}>
-          <option value="">All types</option>
-          {availableTypes.map(t => (
-            <option key={t} value={t}>{t}</option>
-          ))}
-        </select>
+        <MultiSelectDropdown
+          options={availableProjects}
+          selected={filterProjects}
+          onChange={setFilterProjects}
+          placeholder="All projects"
+          className="w-48"
+        />
 
         {/* Period filter */}
         <select className="form-select w-36" value={filterMonth} onChange={e => setFilterMonth(e.target.value)}>
@@ -905,14 +907,14 @@ export default function UserList() {
           disabled={isDownloading}
           className="btn-secondary flex items-center gap-1.5 text-sm"
           title={
-            filterTags.length > 0 || filterType || filterMonth || filterYear
+            filterTags.length > 0 || filterProjects !== null || filterMonth || filterYear
               ? `Download filtered ZIP: ${filtered.length} member(s) currently shown`
               : 'Download full tracking.xlsx (no filters active)'
           }
         >
           {isDownloading
             ? <><span className="spinner w-4 h-4 border-gray-400 border-t-transparent"></span> Downloading…</>
-            : filterTags.length > 0 || filterType || filterMonth || filterYear
+            : filterTags.length > 0 || filterProjects !== null || filterMonth || filterYear
               ? <>📥 Download Filtered ZIP ({filtered.length})</>
               : <>📥 Download Tracking</>}
         </button>
@@ -977,7 +979,7 @@ export default function UserList() {
             {displayed.length === 0 ? (
               <tr>
                 <td colSpan={15} className="text-center text-gray-500 py-8">
-                  {isLoading ? 'Loading…' : filterTags.length > 0 || filterType || filterMonth || filterYear
+                  {isLoading ? 'Loading…' : filterTags.length > 0 || filterProjects !== null || filterMonth || filterYear
                     ? 'No results match the current filters.'
                     : 'No data found.'}
                 </td>
