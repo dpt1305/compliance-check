@@ -2,20 +2,13 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import MultiSelectDropdown from './MultiSelectDropdown';
+import { useAdminEvents } from '@/hooks/useAdminEvents';
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 50; // items per page (passed to API as limit)
 
 const MONTH_NAMES = [
   'January','February','March','April','May','June',
   'July','August','September','October','November','December',
-];
-
-/** All UserListEntry string fields searched by tags — covers every visible column. */
-const SEARCH_KEYS: (keyof UserListEntry)[] = [
-  'name', 'account', 'trackingAccount', 'email', 'serial', 'project',
-  'submissionType', 'deviceType', 'malwareAlerts', 'complianceChecks',
-  'seedConfiguration', 'operatingSystem', 'followUpAction', 'responseFromTicket',
-  'trackingStatus', 'submissionStatus', 'deviceSerial', 'deviceName', 'source',
 ];
 
 /** Return the current month (1-12) and year in GMT+7 (Asia/Bangkok, no DST). */
@@ -107,38 +100,12 @@ function formatDate(d: string | undefined) {
   return d ? new Date(d).toLocaleString() : '';
 }
 
-/** Apply month/year mask: strip submission data from entries outside the selected period. */
-function applyPeriodMask(entry: UserListEntry, month: number, year: number): UserListEntry | null {
-  if (!entry.submissionDate) {
-    // No submission — tracking rows stay, submission-only rows are hidden
-    return entry.source === 'submission' ? null : entry;
-  }
-  const d = new Date(entry.submissionDate);
-  const inPeriod = d.getMonth() + 1 === month && d.getFullYear() === year;
-  if (inPeriod) return entry;
-  // Out of period — submission-only rows hidden, tracking rows shown as NOT_SUBMITTED
-  if (entry.source === 'submission') return null;
-  return {
-    ...entry,
-    submissionId: undefined,
-    submissionStatus: 'NOT_SUBMITTED',
-    submissionDate: undefined,
-    imageUrl: undefined,
-    deviceSerial: undefined,
-    deviceName: undefined,
-    // Clear SEED values — they belong to the other period's submission
-    malwareAlerts: '',
-    complianceChecks: '',
-    seedConfiguration: '',
-    operatingSystem: '',
-  };
-}
-
 export default function UserList() {
-  const [data, setData] = useState<UserListEntry[]>([]);
-  const [filtered, setFiltered] = useState<UserListEntry[]>([]);
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  const [showAll, setShowAll] = useState(false);
+  const [items, setItems] = useState<UserListEntry[]>([]);
+  const [total, setTotal] = useState(0);
+  const [summary, setSummary] = useState({ approved: 0, submitted: 0, notSubmitted: 0 });
+  const [availableProjects, setAvailableProjects] = useState<string[]>([]);
+  const [isFetchingMore, setIsFetchingMore] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
   // Tag-based search filter
@@ -205,98 +172,63 @@ export default function UserList() {
     setTimeout(() => setToast(null), 3500);
   }
 
-  const loadData = useCallback(async () => {
-    setIsLoading(true);
+  // filterRef lets loadPage stay stable while always reading current filter state
+  const filterStateRef = useRef({ filterProjects, filterMonth, filterYear, filterTags });
+
+  const loadPage = useCallback(async (offset: number, reset: boolean) => {
+    const { filterProjects, filterMonth, filterYear, filterTags } = filterStateRef.current;
+    const params = new URLSearchParams();
+    params.set('offset', String(offset));
+    params.set('limit', String(PAGE_SIZE));
+    if (filterProjects !== null) filterProjects.forEach(p => params.append('project', p));
+    if (filterMonth) params.set('month', filterMonth);
+    if (filterYear)  params.set('year',  filterYear);
+    filterTags.forEach(t => params.append('tag', t));
+
+    if (reset) setIsLoading(true); else setIsFetchingMore(true);
     try {
-      const res = await fetch('/api/admin/user-list', { headers: authHeaders() });
+      const res = await fetch(`/api/admin/user-list?${params}`, { headers: authHeaders() });
       if (!res.ok) throw new Error('Failed');
-      const d = await res.json() as UserListEntry[];
-      setData(d);
-      setVisibleCount(PAGE_SIZE);
-      setShowAll(false);
+      const d = await res.json() as { items: UserListEntry[]; total: number; projects: string[]; summary: { approved: number; submitted: number; notSubmitted: number } };
+      if (reset) setItems(d.items); else setItems(prev => [...prev, ...d.items]);
+      setTotal(d.total);
+      setSummary(d.summary);
+      if (d.projects.length > 0) setAvailableProjects(d.projects);
     } catch {
-      showToast('Failed to load user list', false);
+      setToast({ msg: 'Failed to load user list', ok: false });
+      setTimeout(() => setToast(null), 3500);
     } finally {
       setIsLoading(false);
+      setIsFetchingMore(false);
     }
-  }, []);
+  }, []); // stable — reads filters via ref
 
-  useEffect(() => { loadData(); }, [loadData]);
+  const loadData = useCallback(() => loadPage(0, true), [loadPage]);
 
-  // Auto-refresh: poll /api/admin/tracking/version every 15 s (tab-visible only).
-  // fs.stat only — negligible server cost. Silently reloads user list when mtime changes.
+  // Update ref + reload on filter change (also fires on mount for initial load)
   useEffect(() => {
-    let lastMtime = 0;
+    filterStateRef.current = { filterProjects, filterMonth, filterYear, filterTags };
+    loadPage(0, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterProjects, filterMonth, filterYear, filterTags]);
 
-    async function checkVersion() {
-      if (document.visibilityState !== 'visible') return;
-      try {
-        const res = await fetch('/api/admin/tracking/version', { headers: authHeaders() });
-        if (!res.ok) return;
-        const { mtime } = await res.json() as { mtime: number };
-        if (lastMtime === 0) { lastMtime = mtime; return; }   // seed on first call
-        if (mtime !== lastMtime) {
-          lastMtime = mtime;
-          await loadData();
-        }
-      } catch { /* ignore network errors silently */ }
-    }
+  // Real-time updates via SSE — instantly reloads when tracking or submissions change.
+  useAdminEvents({ onTracking: loadData, onSubmissions: loadData });
 
-    const id = setInterval(checkVersion, 15_000);
-    return () => clearInterval(id);
-  }, [loadData]);
-
-
+  // Infinite scroll sentinel
+  const hasMore = items.length < total;
   useEffect(() => {
-    const month = parseInt(filterMonth, 10);
-    const year  = parseInt(filterYear,  10);
-    const hasPeriod = !isNaN(month) && !isNaN(year) && month >= 1 && month <= 12 && year > 0;
-
-    // 1. Apply month/year mask
-    let masked: UserListEntry[] = hasPeriod
-      ? (data.map(e => applyPeriodMask(e, month, year)).filter(Boolean) as UserListEntry[])
-      : data;
-
-    // 2. Project filter — null = no filter; [] = none selected; [...] = filter to listed projects
-    if (filterProjects !== null) {
-      masked = masked.filter(r =>
-        filterProjects.includes(r.project ?? '')
-      );
-    }
-
-    // 3. Tag search — AND logic: row must contain every tag as a substring (case-insensitive) in any field
-    const activeTags = filterTags.map(t => t.trim().toLowerCase()).filter(Boolean);
-    if (activeTags.length > 0) {
-      masked = masked.filter(row =>
-        activeTags.every(tag =>
-          SEARCH_KEYS.some(key => {
-            const val = row[key];
-            return typeof val === 'string' && val.toLowerCase().includes(tag);
-          })
-        )
-      );
-    }
-
-    setFiltered(masked);
-    setVisibleCount(PAGE_SIZE);
-    setShowAll(false);
-  }, [data, filterTags, filterProjects, filterMonth, filterYear]);
-
-  // Infinite scroll
-  useEffect(() => {
-    if (showAll) return;
+    if (!hasMore || isFetchingMore) return;
     const el = sentinelRef.current;
     if (!el) return;
+    const currentOffset = items.length;
     const observer = new IntersectionObserver(
-      entries => { if (entries[0].isIntersecting) setVisibleCount(c => Math.min(c + PAGE_SIZE, filtered.length)); },
+      entries => { if (entries[0].isIntersecting) loadPage(currentOffset, false); },
       { threshold: 0.1 }
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [filtered.length, showAll]);
-
-  const displayed = showAll ? filtered : filtered.slice(0, visibleCount);
-  const hasMore   = !showAll && visibleCount < filtered.length;
+  }, [hasMore, isFetchingMore, items.length, loadPage]);
 
   // ── Edit modal ──────────────────────────────────────────────────────────────
   function openEdit(row: UserListEntry) {
@@ -373,7 +305,7 @@ export default function UserList() {
       if (results.some(r => !r.ok)) throw new Error('One or more updates failed');
 
       // Reflect in local state
-      setData(prev => prev.map(r => {
+      setItems(prev => prev.map(r => {
         if (r !== editRow &&
             !(r.submissionId && r.submissionId === editRow.submissionId) &&
             !(r.trackingRowNum && r.trackingRowNum === editRow.trackingRowNum)) return r;
@@ -410,7 +342,7 @@ export default function UserList() {
     try {
       const res = await fetch(`/api/admin/submissions/${entry.submissionId}`, { method: 'DELETE', headers: authHeaders() });
       if (!res.ok) throw new Error('Failed');
-      setData(prev => prev.map(r =>
+      setItems(prev => prev.map(r =>
         r.submissionId === entry.submissionId
           ? { ...r, submissionId: undefined, submissionStatus: 'NOT_SUBMITTED', submissionDate: undefined, imageUrl: undefined, source: 'tracking' as const }
           : r
@@ -528,9 +460,17 @@ export default function UserList() {
         return;
       }
 
-      // `filtered` is captured from this render's closure — always up-to-date
-      // because handleDownload is a plain function (not useCallback) recreated each render
-      const members = filtered.map((row, idx) => ({
+      // Fetch all filtered items (no pagination limit) for ZIP export
+      const allParams = new URLSearchParams();
+      allParams.set('offset', '0');
+      allParams.set('limit', '99999');
+      if (filterProjects !== null) filterProjects.forEach(p => allParams.append('project', p));
+      if (hasP) { allParams.set('month', String(month)); allParams.set('year', String(year)); }
+      filterTags.forEach(t => allParams.append('tag', t));
+      const allRes = await fetch(`/api/admin/user-list?${allParams}`, { headers: authHeaders() });
+      if (!allRes.ok) { showToast('Failed to fetch filter data', false); return; }
+      const allData = await allRes.json() as { items: UserListEntry[] };
+      const members = allData.items.map((row, idx) => ({
         no: idx + 1,
         name: row.name,
         trackingRowNum: row.trackingRowNum,
@@ -577,11 +517,9 @@ export default function UserList() {
     if (!month || !year) return;
 
     const monthName = MONTH_NAMES[month - 1];
-    const count = filtered.filter(r => r.submissionStatus && r.submissionStatus !== 'NOT_SUBMITTED').length;
-
     const confirmed = confirm(
       `Delete ALL submissions for ${monthName} ${year}?\n\n` +
-      `This will permanently remove ${count} submission record(s) and their associated image files.\n\n` +
+      `This will permanently remove all submission records and their associated image files for this period.\n\n` +
       `This action cannot be undone.`
     );
     if (!confirmed) return;
@@ -601,19 +539,14 @@ export default function UserList() {
   }
 
   // ── Summary ─────────────────────────────────────────────────────────────────
-  const totalCount        = filtered.length;
-  const approvedCount     = filtered.filter(r => r.submissionStatus === 'APPROVED').length;
-  const submittedCount    = filtered.filter(r => r.submissionStatus && r.submissionStatus !== 'NOT_SUBMITTED').length;
-  const notSubmittedCount = filtered.filter(r => !r.submissionStatus || r.submissionStatus === 'NOT_SUBMITTED').length;
+  const totalCount        = total;
+  const approvedCount     = summary.approved;
+  const submittedCount    = summary.submitted;
+  const notSubmittedCount = summary.notSubmitted;
 
   // ── Year options ─────────────────────────────────────────────────────────────
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
-
-  // Derive distinct Projects from loaded data (from tracking project field)
-  const availableProjects = Array.from(
-    new Set(data.map(r => r.project ?? '').filter(Boolean))
-  ).sort();
 
   return (
     <div className="p-4">
@@ -627,7 +560,7 @@ export default function UserList() {
 
       {/* Add member modal */}
       {showAddMemberModal && (
-        <div className="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4" onClick={() => setShowAddMemberModal(false)}>
+        <div className="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg shadow-2xl w-full max-w-xl" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
               <h2 className="font-semibold text-gray-900">Add New Member</h2>
@@ -667,7 +600,7 @@ export default function UserList() {
       {editRow && (() => {
         const imgUrl = relativeImageUrl(editRow.imageUrl);
         return (
-          <div className="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4" onClick={() => setEditRow(null)}>
+          <div className="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4">
             <div
               className="bg-white rounded-lg shadow-2xl flex flex-col w-full max-w-5xl max-h-[90vh]"
               onClick={e => e.stopPropagation()}
@@ -908,14 +841,14 @@ export default function UserList() {
           className="btn-secondary flex items-center gap-1.5 text-sm"
           title={
             filterTags.length > 0 || filterProjects !== null || filterMonth || filterYear
-              ? `Download filtered ZIP: ${filtered.length} member(s) currently shown`
+              ? `Download filtered ZIP: ${total} member(s) currently shown`
               : 'Download full tracking.xlsx (no filters active)'
           }
         >
           {isDownloading
             ? <><span className="spinner w-4 h-4 border-gray-400 border-t-transparent"></span> Downloading…</>
             : filterTags.length > 0 || filterProjects !== null || filterMonth || filterYear
-              ? <>📥 Download Filtered ZIP ({filtered.length})</>
+              ? <>📥 Download Filtered ZIP ({total})</>
               : <>📥 Download Tracking</>}
         </button>
         {/* Clear period — only shown when month+year filter is active */}
@@ -937,20 +870,11 @@ export default function UserList() {
         </button>
       </div>
 
-      {/* Count + show-all toggle */}
+      {/* Count row */}
       <div className="flex items-center justify-between mb-2 text-sm text-gray-500">
         <span>
-          Showing <strong>{displayed.length}</strong> of <strong>{filtered.length}</strong>
-          {filtered.length !== data.length && ` (filtered from ${data.length})`}
+          Showing <strong>{items.length}</strong> of <strong>{total}</strong>
         </span>
-        {filtered.length > PAGE_SIZE && (
-          <button
-            onClick={() => { setShowAll(v => !v); if (showAll) setVisibleCount(PAGE_SIZE); }}
-            className="text-primary-600 hover:underline text-sm font-medium"
-          >
-            {showAll ? `Show first ${PAGE_SIZE}` : `Show all ${filtered.length}`}
-          </button>
-        )}
       </div>
 
       {/* Table */}
@@ -976,7 +900,7 @@ export default function UserList() {
             </tr>
           </thead>
           <tbody>
-            {displayed.length === 0 ? (
+            {items.length === 0 ? (
               <tr>
                 <td colSpan={15} className="text-center text-gray-500 py-8">
                   {isLoading ? 'Loading…' : filterTags.length > 0 || filterProjects !== null || filterMonth || filterYear
@@ -984,7 +908,7 @@ export default function UserList() {
                     : 'No data found.'}
                 </td>
               </tr>
-            ) : displayed.map((row, idx) => (
+            ) : items.map((row, idx) => (
               <tr
                 key={row.submissionId ?? `tr-${row.trackingNo ?? idx}`}
                 className={!row.submissionStatus || row.submissionStatus === 'NOT_SUBMITTED' ? 'bg-red-50' : ''}
@@ -1047,19 +971,18 @@ export default function UserList() {
         </table>
       </div>
 
-      {/* Scroll sentinel */}
-      {hasMore && (
+      {/* Scroll sentinel / load-more indicator */}
+      {hasMore ? (
         <div ref={sentinelRef} className="flex justify-center items-center py-4 text-sm text-gray-400">
-          <span className="spinner w-4 h-4 border-gray-300 border-t-primary-500 mr-2"></span>
-          Loading more…
+          {isFetchingMore
+            ? <><span className="spinner w-4 h-4 border-gray-300 border-t-primary-500 mr-2"></span>Loading more…</>
+            : <span className="py-2 text-gray-300">↓</span>}
         </div>
-      )}
-
-      {!hasMore && filtered.length > 0 && (
+      ) : total > 0 ? (
         <p className="text-center text-xs text-gray-400 py-3">
-          All {filtered.length} {filtered.length === 1 ? 'record' : 'records'} shown
+          All {total} {total === 1 ? 'record' : 'records'} shown
         </p>
-      )}
+      ) : null}
     </div>
   );
 }

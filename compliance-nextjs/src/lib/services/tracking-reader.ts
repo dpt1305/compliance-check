@@ -99,13 +99,13 @@ export function buildColumnMap(sheet: ExcelJS.Worksheet): ColumnMap {
   return cols;
 }
 
-export async function readTrackingRows(): Promise<TrackingRow[]> {
-  const filePath = existingTrackingPath();
-  if (!filePath) return [];
+export async function readTrackingRows(filePath?: string): Promise<TrackingRow[]> {
+  const resolvedPath = filePath ?? existingTrackingPath();
+  if (!resolvedPath) return [];
 
   try {
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(filePath);
+    await workbook.xlsx.readFile(resolvedPath);
     const sheet = workbook.worksheets[0];
     const cols = buildColumnMap(sheet);
     const rows: TrackingRow[] = [];

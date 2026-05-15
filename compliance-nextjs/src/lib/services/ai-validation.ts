@@ -32,17 +32,9 @@ const WINDOWS_PROMPT = `You are a compliance image validator for Windows device 
 
 The submitted screenshot MUST satisfy the following checks:
 
-OPTION A — SEED Dashboard (preferred):
-1. SEED DASHBOARD — A SEED dashboard is visible showing 4 counter values (e.g., "Malware Alerts: X", "Compliance Checks: X", "SEED Configuration: X", "Operating System: X")
-   - The 4 counters are READABLE with full numbers visible (no truncation)
-   - Any counter values (0, 19, 100, etc.) are acceptable
-   - If these 4 counters are present and readable, valid=true
-
-OPTION B — Trellix (fallback if no SEED Dashboard):
 1. CLOCK      — System clock visible in bottom-right corner of Windows taskbar
 2. UPDATE     — Windows Update screen showing "You're up to date"
 3. DEVICE INFO — Device name AND serial number fully visible (no truncation)
-4. TRELLIX STATUS — Trellix showing "trellix status: ok" or "turned on" + "no action needed"
 
 ALSO EXTRACT: device serial number and device name visible anywhere in the screenshot.
 seedDashboard counter values MUST be plain integers (e.g. 4, 19, 0) — no units or labels.
@@ -51,7 +43,7 @@ For each checklist item set to false, add a clear description to "failedChecks" 
 If confidence < 100, every reason for uncertainty must appear in "failedChecks".
 
 Respond ONLY with valid JSON (no markdown):
-{"valid":true,"matchesType":true,"confidence":85,"reason":"...","deviceSerial":"...","deviceName":"...","seedDashboard":{"malwareAlerts":null,"complianceChecks":null,"seedConfiguration":null,"operatingSystem":null},"checklist":{"hasClock":true,"hasWindowsUpdate":true,"hasDeviceName":true,"hasDeviceSerial":true,"hasDashboard":true},"failedChecks":[],"guidelines":[],"suggestion":null}`;
+{"valid":true,"matchesType":true,"confidence":85,"reason":"...","deviceSerial":"...","deviceName":"...","seedDashboard":{"malwareAlerts":null,"complianceChecks":null,"seedConfiguration":null,"operatingSystem":null},"checklist":{"hasClock":true,"hasWindowsUpdate":true,"hasDeviceName":true,"hasDeviceSerial":true},"failedChecks":[],"guidelines":[],"suggestion":null}`;
 
 const MAC_PROMPT = `You are a compliance image validator for macOS device verification.
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { findById, save, deleteById, existsById } from '@/lib/storage/json-storage';
+import { findById, save, deleteById, existsById } from '@/lib/db/submission-repo';
 
 type Params = { params: Promise<{ id: string }> };
 
