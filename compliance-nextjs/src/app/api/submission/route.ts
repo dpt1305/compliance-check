@@ -196,7 +196,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       imageUrl,
       imageOriginalName: imageFile.name,
       imageSavedName: savedName,
-      status: 'APPROVED',
+      status: 'PENDING',
       validationResult: JSON.stringify(aiResult),
       validationChecklist: JSON.stringify(failedChecks),
       confidenceScore: aiResult.confidence,
