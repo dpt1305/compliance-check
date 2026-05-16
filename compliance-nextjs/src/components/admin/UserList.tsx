@@ -45,20 +45,65 @@ interface UserListEntry {
   deviceName?: string;
 }
 
-interface EditFields {
-  status: string;
-  project: string;
-  name: string;
-  email: string;
-  serial: string;
-  account: string;
-  deviceType: string;
-  trackingStatus: string;
-  malwareAlerts: string;
-  complianceChecks: string;
-  seedConfiguration: string;
-  operatingSystem: string;
-  followUpAction: string;
+// Fields that map to /api/admin/user-list PUT (identity columns)
+const TRACKING_FIELDS = new Set(['project','name','email','serial','account','deviceType','trackingStatus']);
+// Fields that map to /api/admin/tracking PUT (seed/Trellix columns)
+const SEED_FIELDS = new Set(['malwareAlerts','complianceChecks','seedConfiguration','operatingSystem','followUpAction']);
+
+// Minimum column widths (px) — auto-sizing will expand beyond this
+const MIN_COL_WIDTHS = {
+  no: 40, project: 60, name: 60, account: 60, email: 60, serial: 60,
+  type: 50, status: 80, malwareAlerts: 80, complianceChecks: 80,
+  seedConfig: 80, os: 50, submitted: 100, image: 56, actions: 72,
+} as const;
+type ColKey = keyof typeof MIN_COL_WIDTHS;
+
+// Default fallback widths — replaced at runtime by computeColWidths()
+const DEFAULT_WIDTHS: Record<ColKey, number> = { ...MIN_COL_WIDTHS };
+
+const COL_HEADERS: Record<ColKey, string> = {
+  no: 'No.', project: 'Project', name: 'Name', account: 'Account', email: 'Email',
+  serial: 'Serial', type: 'Type', status: 'Status', malwareAlerts: 'Malware Alerts',
+  complianceChecks: 'Compliance Checks', seedConfig: 'SEED Config', os: 'OS',
+  submitted: 'Submitted', image: 'Image', actions: 'Actions',
+};
+
+const CHAR_W = 7.2; // approximate px per char at text-xs (12px)
+const COL_PAD = 20; // horizontal cell padding
+
+function computeColWidths(rows: UserListEntry[]): Record<ColKey, number> {
+  // Start with header label lengths
+  const maxLen: Record<string, number> = Object.fromEntries(
+    Object.entries(COL_HEADERS).map(([k, v]) => [k, v.length])
+  );
+
+  for (const row of rows) {
+    const check = (key: string, val: string | null | undefined) => {
+      if (val) maxLen[key] = Math.max(maxLen[key] ?? 0, val.length);
+    };
+    check('project', row.project);
+    check('name', row.name);
+    check('account', row.trackingAccount ?? row.account);
+    check('email', row.email);
+    check('serial', row.serial);
+    check('type', row.deviceType ?? row.submissionType);
+    check('status', row.submissionStatus ?? 'NOT SUBMITTED');
+    check('malwareAlerts', row.malwareAlerts);
+    check('complianceChecks', row.complianceChecks);
+    check('seedConfig', row.seedConfiguration);
+    check('os', row.operatingSystem);
+    check('submitted', row.submissionDate ? formatDate(row.submissionDate) : null);
+  }
+
+  return Object.fromEntries(
+    (Object.keys(MIN_COL_WIDTHS) as ColKey[]).map(k => [
+      k,
+      Math.max(
+        MIN_COL_WIDTHS[k],
+        Math.round((maxLen[k] ?? 0) * CHAR_W + COL_PAD)
+      ),
+    ])
+  ) as Record<ColKey, number>;
 }
 
 interface AddMemberFields {
@@ -117,15 +162,17 @@ export default function UserList() {
   const [filterMonth,  setFilterMonth]  = useState(String(nowMonth));
   const [filterYear,   setFilterYear]   = useState(String(nowYear));
 
-  // Edit modal
-  const [editRow, setEditRow]       = useState<UserListEntry | null>(null);
-  const [editFields, setEditFields] = useState<EditFields>({
-    status: '', project: '', name: '', email: '', serial: '', account: '', deviceType: '', trackingStatus: '',
-    malwareAlerts: '', complianceChecks: '', seedConfiguration: '', operatingSystem: '', followUpAction: '',
-  });
-  const [isSavingEdit, setIsSavingEdit] = useState(false);
-  const [imgZoom, setImgZoom]       = useState(1);
-  const imgContainerRef = useRef<HTMLDivElement>(null);
+  // Image viewer modal (opened by clicking a thumbnail)
+  const [editRow, setEditRow] = useState<UserListEntry | null>(null);
+
+  // Inline cell editing
+  const [editCell, setEditCell] = useState<{ row: UserListEntry; field: string } | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const [isSavingCell, setIsSavingCell] = useState(false);
+
+  // Column resizing
+  const [colWidths, setColWidths] = useState({ ...DEFAULT_WIDTHS });
+  const resizeRef = useRef<{ col: ColKey; startX: number; startW: number } | null>(null);
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [isSavingMember, setIsSavingMember] = useState(false);
   const [addMemberFields, setAddMemberFields] = useState<AddMemberFields>({
@@ -137,26 +184,21 @@ export default function UserList() {
     deviceType: '',
   });
 
-  // Non-passive wheel listener for zoom (must be attached via useEffect — React onWheel is passive)
+  // Column resize — global mouse tracking
   useEffect(() => {
-    const el = imgContainerRef.current;
-    if (!el || !editRow) return;
-
-    function onWheel(e: WheelEvent) {
-      e.preventDefault();
-      setImgZoom(z => {
-        // ctrlKey = pinch gesture on trackpad; deltaY is small (−3 to 3)
-        // plain wheel = mouse scroll wheel; deltaY is large (100+)
-        const delta = e.ctrlKey
-          ? -e.deltaY * 0.02          // pinch: smooth continuous
-          : e.deltaY < 0 ? 0.15 : -0.15; // mouse wheel: discrete steps
-        return Math.min(Math.max(z + delta, 0.25), 4);
-      });
+    function onMouseMove(e: MouseEvent) {
+      if (!resizeRef.current) return;
+      const { col, startX, startW } = resizeRef.current;
+      setColWidths(prev => ({ ...prev, [col]: Math.max(40, startW + e.clientX - startX) }));
     }
-
-    el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
-  }, [editRow]);
+    function onMouseUp() { resizeRef.current = null; }
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+  }, []);
 
   // Upload / download / clear
   const [isUploading,   setIsUploading]   = useState(false);
@@ -190,7 +232,16 @@ export default function UserList() {
       const res = await fetch(`/api/admin/user-list?${params}`, { headers: authHeaders() });
       if (!res.ok) throw new Error('Failed');
       const d = await res.json() as { items: UserListEntry[]; total: number; projects: string[]; summary: { approved: number; submitted: number; notSubmitted: number } };
-      if (reset) setItems(d.items); else setItems(prev => [...prev, ...d.items]);
+      if (reset) {
+        setItems(d.items);
+        setColWidths(computeColWidths(d.items));
+      } else {
+        setItems(prev => {
+          const merged = [...prev, ...d.items];
+          setColWidths(computeColWidths(merged));
+          return merged;
+        });
+      }
       setTotal(d.total);
       setSummary(d.summary);
       if (d.projects.length > 0) setAvailableProjects(d.projects);
@@ -230,110 +281,130 @@ export default function UserList() {
     return () => observer.disconnect();
   }, [hasMore, isFetchingMore, items.length, loadPage]);
 
-  // ── Edit modal ──────────────────────────────────────────────────────────────
-  function openEdit(row: UserListEntry) {
+  // ── Image viewer (thumbnail click) ─────────────────────────────────────────
+  function openImageViewer(row: UserListEntry) {
     setEditRow(row);
-    setImgZoom(1);
-    setEditFields({
-      status:           row.submissionStatus && row.submissionStatus !== 'NOT_SUBMITTED' ? row.submissionStatus : 'PENDING',
-      project:          row.project ?? '',
-      name:             row.name ?? '',
-      email:            row.email ?? '',
-      serial:           row.serial ?? '',
-      account:          row.trackingAccount ?? row.account ?? '',
-      deviceType:       row.deviceType ?? row.submissionType ?? '',
-      trackingStatus:   row.trackingStatus   ?? '',
-      malwareAlerts:    row.malwareAlerts    ?? '',
-      complianceChecks: row.complianceChecks ?? '',
-      seedConfiguration:row.seedConfiguration ?? '',
-      operatingSystem:  row.operatingSystem  ?? '',
-      followUpAction:   row.followUpAction   ?? '',
-    });
   }
 
-  async function saveEdit() {
-    if (!editRow) return;
-    if (editRow.trackingRowNum && !editFields.name.trim()) {
-      showToast('Name is required', false);
-      return;
-    }
-    setIsSavingEdit(true);
+  // ── Inline cell editing ──────────────────────────────────────────────────────
+  function startCellEdit(row: UserListEntry, field: string, currentValue: string) {
+    setEditCell({ row, field });
+    setEditValue(currentValue);
+  }
+  function cancelCellEdit() { setEditCell(null); setEditValue(''); }
+
+  async function commitCellEdit() {
+    if (!editCell) return;
+    const { row, field } = editCell;
+    const value = editValue.trim();
+
+    if (field === 'name' && !value) { showToast('Name is required', false); return; }
+
+    setIsSavingCell(true);
     try {
-      const jobs: Promise<Response>[] = [];
+      let ok = true;
 
-      // 1. Update submission status
-      if (editRow.submissionId && editFields.status && editFields.status !== 'NOT_SUBMITTED') {
-        jobs.push(fetch(`/api/admin/submissions/${editRow.submissionId}`, {
-          method: 'PUT',
-          headers: authHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ status: editFields.status }),
-        }));
+      if (field === 'submissionStatus') {
+        if (row.submissionId) {
+          const r = await fetch(`/api/admin/submissions/${row.submissionId}`, {
+            method: 'PUT',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ status: value }),
+          });
+          ok = r.ok;
+        }
+      } else if (TRACKING_FIELDS.has(field)) {
+        if (row.trackingRowNum) {
+          const r = await fetch('/api/admin/user-list', {
+            method: 'PUT',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ rowNum: row.trackingRowNum, [field]: value }),
+          });
+          ok = r.ok;
+        }
+      } else if (SEED_FIELDS.has(field)) {
+        if (row.trackingRowNum) {
+          const r = await fetch('/api/admin/tracking', {
+            method: 'PUT',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ rowNum: row.trackingRowNum, [field]: value }),
+          });
+          ok = r.ok;
+        }
       }
 
-      // 2. Update tracking.xlsx row
-      if (editRow.trackingRowNum) {
-        jobs.push(fetch('/api/admin/user-list', {
-          method: 'PUT',
-          headers: authHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({
-            rowNum:         editRow.trackingRowNum,
-            project:        editFields.project,
-            name:           editFields.name,
-            email:          editFields.email,
-            serial:         editFields.serial,
-            account:        editFields.account,
-            deviceType:     editFields.deviceType,
-            trackingStatus: editFields.trackingStatus,
-          }),
-        }));
+      if (!ok) throw new Error('Update failed');
 
-        jobs.push(fetch('/api/admin/tracking', {
-          method: 'PUT',
-          headers: authHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({
-            rowNum:           editRow.trackingRowNum,
-            malwareAlerts:    editFields.malwareAlerts,
-            complianceChecks: editFields.complianceChecks,
-            seedConfiguration:editFields.seedConfiguration,
-            operatingSystem:  editFields.operatingSystem,
-            followUpAction:   editFields.followUpAction,
-          }),
-        }));
-      }
-
-      const results = await Promise.all(jobs);
-      if (results.some(r => !r.ok)) throw new Error('One or more updates failed');
-
-      // Reflect in local state
+      // Reflect in local state immediately
       setItems(prev => prev.map(r => {
-        if (r !== editRow &&
-            !(r.submissionId && r.submissionId === editRow.submissionId) &&
-            !(r.trackingRowNum && r.trackingRowNum === editRow.trackingRowNum)) return r;
-        return {
-          ...r,
-          submissionStatus: editRow.submissionId ? editFields.status : r.submissionStatus,
-          project:          editFields.project,
-          name:             editFields.name,
-          email:            editFields.email,
-          serial:           editFields.serial,
-          trackingAccount:  editFields.account,
-          deviceType:       editFields.deviceType,
-          malwareAlerts:    editFields.malwareAlerts,
-          complianceChecks: editFields.complianceChecks,
-          seedConfiguration:editFields.seedConfiguration,
-          operatingSystem:  editFields.operatingSystem,
-          followUpAction:   editFields.followUpAction,
-          trackingStatus:   editFields.trackingStatus,
-        };
+        if (r.submissionId !== row.submissionId && r.trackingRowNum !== row.trackingRowNum) return r;
+        const patch: Partial<UserListEntry> = {};
+        if (field === 'submissionStatus') patch.submissionStatus = value;
+        else if (field === 'project') patch.project = value;
+        else if (field === 'name') patch.name = value;
+        else if (field === 'email') patch.email = value;
+        else if (field === 'serial') patch.serial = value;
+        else if (field === 'account') patch.trackingAccount = value;
+        else if (field === 'deviceType') patch.deviceType = value;
+        else if (field === 'trackingStatus') patch.trackingStatus = value;
+        else if (field === 'malwareAlerts') patch.malwareAlerts = value;
+        else if (field === 'complianceChecks') patch.complianceChecks = value;
+        else if (field === 'seedConfiguration') patch.seedConfiguration = value;
+        else if (field === 'operatingSystem') patch.operatingSystem = value;
+        else if (field === 'followUpAction') patch.followUpAction = value;
+        return { ...r, ...patch };
       }));
+      setEditCell(null);
+      showToast('Saved', true);
+    } catch { showToast('Save failed', false); }
+    finally { setIsSavingCell(false); }
+  }
 
-      setEditRow(null);
-      showToast('Updated successfully', true);
-    } catch {
-      showToast('Update failed', false);
-    } finally {
-      setIsSavingEdit(false);
+  /** Returns a double-click-to-edit table cell — called as a function, NOT used as <Component> to avoid remount */
+  function renderCell(row: UserListEntry, field: string, value: string, className = '') {
+    const active = editCell?.row === row && editCell?.field === field;
+    const canEdit = TRACKING_FIELDS.has(field) || SEED_FIELDS.has(field) ? !!row.trackingRowNum : false;
+
+    if (active) {
+      return (
+        <td key={field} className={`${className} p-0 align-top`} style={{ minWidth: 90 }}>
+          <div className="flex flex-col gap-1 p-1">
+            <input
+              className="form-input text-xs py-0.5 px-1 w-full"
+              value={editValue}
+              onChange={e => setEditValue(e.target.value)}
+              autoFocus
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commitCellEdit(); } if (e.key === 'Escape') cancelCellEdit(); }}
+            />
+            <div className="flex gap-1 justify-start">
+              <button
+                onMouseDown={e => { e.preventDefault(); commitCellEdit(); }}
+                disabled={isSavingCell}
+                className="w-5 h-5 rounded-full bg-green-500 hover:bg-green-600 text-white text-xs flex items-center justify-center disabled:opacity-50"
+                title="Save (Enter)"
+              >✓</button>
+              <button
+                onMouseDown={e => { e.preventDefault(); cancelCellEdit(); }}
+                className="w-5 h-5 rounded-full bg-red-500 hover:bg-red-600 text-white text-xs flex items-center justify-center"
+                title="Cancel (Esc)"
+              >✕</button>
+            </div>
+          </div>
+        </td>
+      );
     }
+
+    return (
+      <td
+        key={field}
+        className={`${className} ${canEdit ? 'cursor-pointer hover:bg-indigo-50 group' : ''}`}
+        onDoubleClick={canEdit ? (e) => { e.stopPropagation(); startCellEdit(row, field, value); } : undefined}
+        title={canEdit ? 'Double-click to edit' : undefined}
+      >
+        <span className="block truncate">{value || <span className="text-gray-300">—</span>}</span>
+        {canEdit && <span className="hidden group-hover:inline-block ml-1 text-indigo-300 text-xs">✎</span>}
+      </td>
+    );
   }
 
   async function deleteSubmission(entry: UserListEntry) {
@@ -596,139 +667,43 @@ export default function UserList() {
         </div>
       )}
 
-      {/* Edit modal */}
+      {/* Image viewer modal — iframe gives native browser zoom/scroll experience */}
       {editRow && (() => {
         const imgUrl = relativeImageUrl(editRow.imageUrl);
         return (
-          <div className="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-40 bg-black/70 flex items-center justify-center p-4" onClick={() => setEditRow(null)}>
             <div
-              className="bg-white rounded-lg shadow-2xl flex flex-col w-full max-w-5xl max-h-[90vh]"
+              className="bg-white rounded-lg shadow-2xl flex flex-col w-full max-w-5xl"
+              style={{ height: '90vh' }}
               onClick={e => e.stopPropagation()}
             >
               {/* Header */}
               <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 shrink-0">
-                <h2 className="font-semibold text-gray-900 truncate">{editRow.name}{editRow.email ? ` — ${editRow.email}` : ''}</h2>
-                <button onClick={() => setEditRow(null)} className="text-gray-400 hover:text-gray-700 text-2xl leading-none ml-4">×</button>
+                <h2 className="font-semibold text-gray-900 truncate">
+                  {editRow.name}{editRow.email ? ` — ${editRow.email}` : ''}
+                </h2>
+                <div className="flex items-center gap-2 ml-4 shrink-0">
+                  {imgUrl && (
+                    <a href={imgUrl} target="_blank" rel="noopener noreferrer" className="btn-icon text-primary-600 text-sm" title="Open in new tab">↗ New tab</a>
+                  )}
+                  <button onClick={() => setEditRow(null)} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">×</button>
+                </div>
               </div>
 
-              {/* Body: left = form, right = image viewer */}
-              <div className="flex flex-1 min-h-0">
-
-                {/* Left: form fields */}
-                <div className="w-80 shrink-0 border-r border-gray-100 flex flex-col">
-                  <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
-                    {editRow.submissionId && (
-                      <div className="form-field">
-                        <label className="form-label">Submission Status</label>
-                        <select className="form-select" value={editFields.status} onChange={e => setEditFields(f => ({ ...f, status: e.target.value }))}>
-                          {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-                        </select>
-                      </div>
-                    )}
-                    {[
-                      { key: 'project',        label: 'Project' },
-                      { key: 'name',           label: 'Name *' },
-                      { key: 'email',          label: 'Email' },
-                      { key: 'serial',         label: 'Serial' },
-                      { key: 'account',        label: 'Account' },
-                      { key: 'deviceType',     label: 'Type' },
-                      { key: 'trackingStatus', label: 'Tracking Status' },
-                    ].map(({ key, label }) => (
-                      <div key={key} className="form-field">
-                        <label className="form-label">{label}</label>
-                        <input
-                          className="form-input"
-                          value={editFields[key as keyof EditFields]}
-                          onChange={e => setEditFields(f => ({ ...f, [key]: e.target.value }))}
-                          disabled={!editRow.trackingRowNum}
-                        />
-                      </div>
-                    ))}
-                    {[
-                      { key: 'malwareAlerts',     label: 'Malware Alerts'    },
-                      { key: 'complianceChecks',  label: 'Compliance Checks' },
-                      { key: 'seedConfiguration', label: 'SEED Configuration'},
-                      { key: 'operatingSystem',   label: 'Operating System'  },
-                      { key: 'followUpAction',    label: 'Follow Up Action'  },
-                    ].map(({ key, label }) => (
-                      <div key={key} className="form-field">
-                        <label className="form-label">{label}</label>
-                        <input
-                          className="form-input"
-                          value={editFields[key as keyof EditFields]}
-                          onChange={e => setEditFields(f => ({ ...f, [key]: e.target.value }))}
-                          disabled={!editRow.trackingRowNum && key !== 'status'}
-                        />
-                      </div>
-                    ))}
-                    {!editRow.trackingRowNum && (
-                      <p className="text-xs text-amber-600 bg-amber-50 rounded px-3 py-2">
-                        No tracking row — tracking fields cannot be edited.
-                      </p>
-                    )}
+              {/* Native browser image frame */}
+              <div className="flex-1 min-h-0 bg-gray-100 rounded-b-lg overflow-hidden">
+                {imgUrl ? (
+                  <iframe
+                    src={imgUrl}
+                    title="Image viewer"
+                    style={{ width: '100%', height: '100%', border: 'none' }}
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center text-gray-400 gap-2 h-full">
+                    <span className="text-5xl">🖼️</span>
+                    <span className="text-sm">No image submitted</span>
                   </div>
-                  <div className="flex justify-end gap-2 px-5 py-3 border-t border-gray-100 shrink-0">
-                    <button onClick={() => setEditRow(null)} className="btn-secondary">Cancel</button>
-                    <button onClick={saveEdit} disabled={isSavingEdit} className="btn-primary flex items-center gap-2">
-                      {isSavingEdit && <span className="spinner w-4 h-4 border-white border-t-transparent"></span>}
-                      Save
-                    </button>
-                  </div>
-                </div>
-
-                {/* Right: image viewer */}
-                <div className="flex-1 flex flex-col min-w-0 bg-gray-50">
-                  {/* Image toolbar */}
-                  <div className="flex items-center gap-1.5 px-3 py-2 border-b border-gray-100 bg-white shrink-0 flex-wrap">
-                    <button
-                      onClick={() => setImgZoom(z => Math.min(z + 0.25, 4))}
-                      className="btn-icon text-gray-600" title="Zoom in"
-                    >🔍+</button>
-                    <button
-                      onClick={() => setImgZoom(z => Math.max(z - 0.25, 0.25))}
-                      className="btn-icon text-gray-600" title="Zoom out"
-                    >🔍−</button>
-                    <button
-                      onClick={() => setImgZoom(1)}
-                      className="btn-icon text-gray-600 text-xs font-mono" title="Reset zoom"
-                    >{Math.round(imgZoom * 100)}%</button>
-                    <div className="flex-1" />
-                    {imgUrl && (
-                      <>
-                        <a
-                          href={imgUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="btn-icon text-primary-600" title="Open in new tab"
-                        >↗</a>
-                        <a
-                          href={`${imgUrl}?dl=1`}
-                          download
-                          className="btn-icon text-gray-600" title="Download image"
-                        >⬇</a>
-                      </>
-                    )}
-                  </div>
-
-                  {/* Image area — wheel events handled by non-passive listener */}
-                  <div ref={imgContainerRef} className="flex-1 overflow-auto flex items-start justify-center p-4" style={{ cursor: 'zoom-in' }}>
-                    {imgUrl ? (
-                      /* eslint-disable-next-line @next/next/no-img-element */
-                      <img
-                        src={imgUrl}
-                        alt="submission"
-                        style={{ transform: `scale(${imgZoom})`, transformOrigin: 'top center', transition: 'transform 0.15s ease' }}
-                        className="max-w-full rounded shadow"
-                        onError={e => { (e.target as HTMLImageElement).style.opacity = '0'; }}
-                      />
-                    ) : (
-                      <div className="flex flex-col items-center justify-center text-gray-400 gap-2 mt-16">
-                        <span className="text-4xl">🖼️</span>
-                        <span className="text-sm">No image submitted</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                )}
               </div>
             </div>
           </div>
@@ -879,24 +854,27 @@ export default function UserList() {
 
       {/* Table */}
       <div className="card overflow-x-auto">
-        <table className="data-table text-xs">
+        <table className="data-table text-xs" style={{ tableLayout: 'fixed', minWidth: Object.values(colWidths).reduce((a, b) => a + b, 0) }}>
+          <colgroup>
+            {(Object.keys(MIN_COL_WIDTHS) as ColKey[]).map(k => (
+              <col key={k} style={{ width: colWidths[k] }} />
+            ))}
+          </colgroup>
           <thead>
             <tr>
-              <th>No.</th>
-              <th>Project</th>
-              <th>Name</th>
-              <th>Account</th>
-              <th>Email</th>
-              <th>Serial</th>
-              <th>Type</th>
-              <th>Status</th>
-              <th className="whitespace-nowrap">Malware Alerts</th>
-              <th className="whitespace-nowrap">Compliance Checks</th>
-              <th className="whitespace-nowrap">SEED Config</th>
-              <th className="whitespace-nowrap">OS</th>
-              <th className="whitespace-nowrap">Submitted</th>
-              <th>Image</th>
-              <th>Actions</th>
+              {(Object.keys(COL_HEADERS) as ColKey[]).map(col => (
+                <th key={col} className="relative select-none whitespace-nowrap overflow-hidden" style={{ width: colWidths[col] }}>
+                  <span className="block truncate pr-2">{COL_HEADERS[col]}</span>
+                  {/* Resize handle */}
+                  <span
+                    className="absolute top-0 right-0 h-full w-2 cursor-col-resize hover:bg-indigo-300/40"
+                    onMouseDown={e => {
+                      e.preventDefault();
+                      resizeRef.current = { col, startX: e.clientX, startW: colWidths[col] };
+                    }}
+                  />
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -913,32 +891,86 @@ export default function UserList() {
                 key={row.submissionId ?? `tr-${row.trackingNo ?? idx}`}
                 className={!row.submissionStatus || row.submissionStatus === 'NOT_SUBMITTED' ? 'bg-red-50' : ''}
               >
+                {/* No. — not editable */}
                 <td className="text-gray-400 font-medium">{idx + 1}</td>
-                <td className="text-gray-500 whitespace-nowrap">{row.project ?? '—'}</td>
-                <td className="font-medium whitespace-nowrap">{row.name}</td>
-                <td className="text-gray-500 whitespace-nowrap">{row.trackingAccount || row.account || '—'}</td>
-                <td className="text-gray-500 max-w-[140px] truncate" title={row.email}>{row.email ?? '—'}</td>
-                <td className="font-mono text-gray-600 whitespace-nowrap">{row.serial ?? '—'}</td>
-                <td className="capitalize whitespace-nowrap">{row.deviceType || row.submissionType || '—'}</td>
-                <td>
-                  <span className={statusBadge(row.submissionStatus)}>
-                    {statusLabel(row.submissionStatus)}
-                  </span>
+
+                {/* Project */}
+                {renderCell(row, 'project', row.project ?? '', 'text-gray-500')}
+
+                {/* Name */}
+                {renderCell(row, 'name', row.name ?? '', 'font-medium')}
+
+                {/* Account */}
+                {renderCell(row, 'account', row.trackingAccount ?? row.account ?? '', 'text-gray-500')}
+
+                {/* Email */}
+                {renderCell(row, 'email', row.email ?? '', 'text-gray-500')}
+
+                {/* Serial */}
+                {renderCell(row, 'serial', row.serial ?? '', 'font-mono text-gray-600')}
+
+                {/* Type */}
+                {renderCell(row, 'deviceType', row.deviceType ?? row.submissionType ?? '', 'capitalize')}
+
+                {/* Status — direct dropdown for submitted members; badge for unsubmitted */}
+                {row.submissionId ? (
+                  <td className="p-1">
+                    <select
+                      className="form-select text-xs py-0.5 px-1 w-full"
+                      value={row.submissionStatus ?? 'PENDING'}
+                      onChange={async e => {
+                        const newStatus = e.target.value;
+                        setItems(prev => prev.map(r =>
+                          r.submissionId === row.submissionId ? { ...r, submissionStatus: newStatus } : r
+                        ));
+                        try {
+                          const res = await fetch(`/api/admin/submissions/${row.submissionId}`, {
+                            method: 'PUT',
+                            headers: authHeaders({ 'Content-Type': 'application/json' }),
+                            body: JSON.stringify({ status: newStatus }),
+                          });
+                          if (!res.ok) throw new Error();
+                        } catch {
+                          // revert on error
+                          setItems(prev => prev.map(r =>
+                            r.submissionId === row.submissionId ? { ...r, submissionStatus: row.submissionStatus } : r
+                          ));
+                          showToast('Failed to update status', false);
+                        }
+                      }}
+                    >
+                      {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </td>
+                ) : (
+                  <td>
+                    <span className={statusBadge(row.submissionStatus)}>{statusLabel(row.submissionStatus)}</span>
+                  </td>
+                )}
+
+                {/* Malware Alerts */}
+                {renderCell(row, 'malwareAlerts', row.malwareAlerts ?? '')}
+
+                {/* Compliance Checks */}
+                {renderCell(row, 'complianceChecks', row.complianceChecks ?? '')}
+
+                {/* SEED Config */}
+                {renderCell(row, 'seedConfiguration', row.seedConfiguration ?? '')}
+
+                {/* OS */}
+                {renderCell(row, 'operatingSystem', row.operatingSystem ?? '')}
+
+                {/* Submitted — read-only */}
+                <td className="text-gray-400 whitespace-nowrap truncate">
+                  {row.submissionDate ? formatDate(row.submissionDate) : <span className="text-red-400">—</span>}
                 </td>
-                <td>{dash(row.malwareAlerts)}</td>
-                <td>{dash(row.complianceChecks)}</td>
-                <td>{dash(row.seedConfiguration)}</td>
-                <td>{dash(row.operatingSystem)}</td>
-                <td className="text-gray-400 whitespace-nowrap">
-                  {row.submissionDate
-                    ? formatDate(row.submissionDate)
-                    : <span className="text-red-400">—</span>}
-                </td>
+
+                {/* Image thumbnail */}
                 <td>
                   {(() => {
                     const thumb = relativeImageUrl(row.imageUrl);
                     return thumb ? (
-                      <button onClick={() => openEdit(row)} title="View image" className="block">
+                      <button onClick={() => openImageViewer(row)} title="View image" className="block">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={thumb}
@@ -954,9 +986,10 @@ export default function UserList() {
                     ) : <span className="text-gray-200">—</span>;
                   })()}
                 </td>
+
+                {/* Actions — only delete buttons remain */}
                 <td>
                   <div className="flex gap-1">
-                    <button onClick={() => openEdit(row)} className="btn-icon text-primary-600" title="Edit">✏️</button>
                     {row.trackingRowNum && (
                       <button onClick={() => deleteMember(row)} className="btn-icon text-amber-700" title="Delete member">🧾</button>
                     )}

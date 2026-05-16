@@ -5,6 +5,28 @@ import ValidationGuidance from './ValidationGuidance';
 import ValidationResult from './ValidationResult';
 import Link from 'next/link';
 
+type MemberRow = {
+  no: number | null;
+  project: string | null;
+  name: string | null;
+  email: string | null;
+  serial: string | null;
+  trackingAccount: string | null;
+  deviceType: string | null;
+  malwareAlerts: string | null;
+  complianceChecks: string | null;
+  seedConfiguration: string | null;
+  operatingSystem: string | null;
+  trackingStatus: string | null;
+  submissionId: number | null;
+  account: string;
+  submissionType: string | null;
+  submissionStatus: string | null;
+  submissionDate: string | null;
+  imageUrl: string | null;
+  confidenceScore: number | null;
+};
+
 type SubmissionResponse = {
   id?: number; account: string; submissionType: string;
   imageUrl?: string; imageSavedName?: string; status: string;
@@ -62,14 +84,6 @@ function formatBytes(n: number) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function previewName(account: string, type: string, file: File): string {
-  const ext = file.name.split('.').pop()?.toLowerCase() ?? 'jpg';
-  const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const safeAcc = account.toLowerCase().replace(/[^a-z0-9]/g, '') || 'account';
-  const safeType = type.toLowerCase().replace(/[^a-z0-9]/g, '');
-  return `${safeAcc}_${safeType}_${date}.${ext}`;
-}
-
 export default function DashboardForm() {
   const [account, setAccount] = useState('');
   const [submissionType, setSubmissionType] = useState('');
@@ -78,9 +92,9 @@ export default function DashboardForm() {
   const [fileValidating, setFileValidating] = useState(false);
   const [fileTouched, setFileTouched] = useState(false);
   const [supportedTypes, setSupportedTypes] = useState<string[]>([]);
-  const [previewFilename, setPreviewFilename] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<SubmissionResponse | null>(null);
+  const [memberRow, setMemberRow] = useState<MemberRow | null>(null);
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const resultRef = useRef<HTMLDivElement>(null);
@@ -91,11 +105,6 @@ export default function DashboardForm() {
       .then((d: { types: string[] }) => setSupportedTypes([...d.types].sort()))
       .catch(() => showToast('Failed to load submission types', false));
   }, []);
-
-  useEffect(() => {
-    if (file && submissionType) setPreviewFilename(previewName(account, submissionType, file));
-    else setPreviewFilename('');
-  }, [account, submissionType, file]);
 
   function showToast(msg: string, ok: boolean) {
     setToast({ msg, ok });
@@ -133,8 +142,13 @@ export default function DashboardForm() {
       if (!res.ok) { showToast(data.message ?? 'Submission failed', false); return; }
       setResult(data);
       setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
-      if (data.status === 'APPROVED') {
-        showToast('Submission approved!', true);
+      if (data.status !== 'REJECTED') {
+        showToast('Submission accepted! Awaiting admin approval.', true);
+        // Fetch member row to display full user-list-style entry
+        fetch(`/api/submission/member?account=${encodeURIComponent(account)}`)
+          .then(r => r.json())
+          .then((row: MemberRow) => setMemberRow(row))
+          .catch(() => setMemberRow(null));
       } else {
         showToast('Validation failed. Please fix the issues and try again.', false);
       }
@@ -249,15 +263,6 @@ export default function DashboardForm() {
             </div>
           </div>
 
-          {/* Filename preview */}
-          {previewFilename && (
-            <div className="flex items-center gap-2 px-3 py-2 bg-green-50 rounded border border-green-200 text-sm">
-              <span>👁️</span>
-              <span className="text-gray-600">Will be saved as:</span>
-              <code className="bg-white px-1.5 py-0.5 rounded text-xs border break-all">{previewFilename}</code>
-            </div>
-          )}
-
           {/* Submit */}
           <div className="flex justify-end pt-2">
             <button
@@ -278,7 +283,7 @@ export default function DashboardForm() {
         </form>
       </div>
 
-      {result && <div ref={resultRef}><ValidationResult result={result} /></div>}
+      {result && <div ref={resultRef}><ValidationResult result={result} memberRow={memberRow} /></div>}
     </div>
   );
 }
