@@ -1,0 +1,18 @@
+# Local variable overrides — contains your real IPs, bucket names, etc.
+terraform.tfvars
+
+# Terraform state files — may contain sensitive data (use remote state in teams)
+*.tfstate
+*.tfstate.*
+.terraform.tfstate.lock.info
+
+# Terraform working directory
+.terraform/
+.terraform.lock.hcl
+
+# Crash logs
+crash.log
+crash.*.log
+
+# Generated plan files
+*.tfplan

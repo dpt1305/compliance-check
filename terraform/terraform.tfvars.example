@@ -1,0 +1,28 @@
+# Copy this file to terraform.tfvars and fill in your values
+# Run: cp terraform.tfvars.example terraform.tfvars
+
+# ── Region & naming ───────────────────────────────────────────────────────────
+aws_region   = "ap-southeast-1"
+project_name = "compliance-app"
+environment  = "production"
+
+# ── EC2 ───────────────────────────────────────────────────────────────────────
+instance_type    = "t2.micro"   # free-tier eligible
+root_volume_size = 20           # GB; increase if builds run out of space
+
+# Path to the public key you want uploaded as the EC2 key pair
+# Generate one with: ssh-keygen -t ed25519 -f ~/.ssh/compliance-app
+ssh_key_name        = "compliance-app-key"
+ssh_public_key_path = "~/.ssh/compliance-app.pub"
+
+# Restrict SSH to YOUR IP only — never leave this as 0.0.0.0/0 in production
+# Find your IP: curl ifconfig.me
+allowed_ssh_cidr = "YOUR_IP/32"
+
+# ── S3 ────────────────────────────────────────────────────────────────────────
+# Must be globally unique across all AWS accounts
+s3_bucket_name = "my-compliance-images"
+
+# ── Networking ────────────────────────────────────────────────────────────────
+vpc_cidr           = "10.0.0.0/16"
+public_subnet_cidr = "10.0.1.0/24"
