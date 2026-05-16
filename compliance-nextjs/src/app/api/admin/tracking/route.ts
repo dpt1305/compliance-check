@@ -6,7 +6,7 @@ import ExcelJS from 'exceljs';
 import { trackingFilePath } from '@/lib/utils/tracking-path';
 import { readTrackingRows } from '@/lib/services/tracking-reader';
 import { findAll } from '@/lib/db/submission-repo';
-import { readAll as readTrackingDB, replaceAll, updateSeedFields } from '@/lib/db/tracking-repo';
+import { readAll as readTrackingDB, readActive as readActiveTrackingDB, replaceAll, mergeFromUpload, updateSeedFields } from '@/lib/db/tracking-repo';
 import { bumpTrackingVersion } from '@/lib/db/index';
 import { getImageBuffer } from '@/lib/utils/file-storage';
 
@@ -50,7 +50,7 @@ function sanitizeName(name: string): string {
  *   - Filtered ZIP exports are handled exclusively by POST
  */
 export async function GET(_req: NextRequest): Promise<NextResponse> {
-  const rows = readTrackingDB();
+  const rows = readActiveTrackingDB();
   if (rows.length === 0) {
     // Fall back to disk file if DB is empty (migration hasn't run yet)
     const diskPath = trackingFilePath();
@@ -127,9 +127,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(dest, buf);
 
-      // Parse and import into DB
+      // Parse and import into DB using smart merge (preserves seed fields, keeps removed members)
       const parsed = await readTrackingRows(dest);
-      replaceAll(parsed.map(r => ({
+      const { inserted, updated, preserved } = mergeFromUpload(parsed.map(r => ({
         no:                 r.no ?? undefined,
         project:            r.project || undefined,
         name:               r.name,
@@ -147,7 +147,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       })));
       bumpTrackingVersion();
 
-      return NextResponse.json({ message: 'Tracking file updated successfully', path: path.basename(dest), size: buf.length, rows: parsed.length });
+      return NextResponse.json({
+        message: 'Tracking file updated successfully',
+        path: path.basename(dest),
+        size: buf.length,
+        rows: parsed.length,
+        inserted,
+        updated,
+        preserved,
+      });
     } catch (err) {
       console.error('[tracking-upload] Failed:', (err as Error).message);
       return NextResponse.json({ message: 'Upload failed' }, { status: 500 });
@@ -171,7 +179,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // Build filtered tracking xlsx from DB rows
     {
-      const allDbRows = readTrackingDB();
+      const allDbRows = readActiveTrackingDB();
       const memberIdSet = new Set(members.filter(m => m.trackingRowNum).map(m => m.trackingRowNum as number));
       const idToMember = new Map(members.filter(m => m.trackingRowNum).map(m => [m.trackingRowNum as number, m]));
       const filteredDbRows = allDbRows.filter(r => memberIdSet.has(r.id));

@@ -17,6 +17,7 @@ export const trackingMembers = sqliteTable('tracking_members', {
   followUpAction:     text('follow_up_action'),
   responseFromTicket: text('response_from_ticket'),
   trackingStatus:     text('tracking_status'),
+  removedFromTracking: integer('removed_from_tracking', { mode: 'boolean' }).notNull().default(false),
   createdAt:          text('created_at'),
   updatedAt:          text('updated_at'),
 });
