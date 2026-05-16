@@ -42,6 +42,7 @@ function createDb() {
       follow_up_action    TEXT,
       response_from_ticket TEXT,
       tracking_status     TEXT,
+      removed_from_tracking INTEGER NOT NULL DEFAULT 0,
       created_at          TEXT,
       updated_at          TEXT
     );
@@ -101,17 +102,17 @@ function createDb() {
   // Seed meta version counter if missing
   sqlite.prepare(`INSERT OR IGNORE INTO _meta (key, value) VALUES ('tracking_version', '0')`).run();
 
+  // Idempotent column additions for schema evolution (ALTER TABLE IF NOT EXISTS not available in older SQLite)
+  try { sqlite.exec(`ALTER TABLE tracking_members ADD COLUMN removed_from_tracking INTEGER NOT NULL DEFAULT 0`); } catch { /* column already exists */ }
+
   return db;
 }
 
-// Singleton — reuse across hot-reloads in dev
+// Singleton — always reuse across module reloads (both dev and production)
 const globalForDb = globalThis as unknown as { _db?: ReturnType<typeof createDb> };
 
 export const db = globalForDb._db ?? createDb();
-
-if (process.env.NODE_ENV !== 'production') {
-  globalForDb._db = db;
-}
+globalForDb._db = db;
 
 /** Increment tracking_version in _meta and return new value. */
 export function bumpTrackingVersion(): number {

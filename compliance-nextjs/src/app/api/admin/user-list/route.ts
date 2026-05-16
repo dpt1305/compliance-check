@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findAll } from '@/lib/db/submission-repo';
 import {
-  readAll, insertMember, updateMember, deleteMember,
+  readAll, readActive, insertMember, updateMember, deleteMember,
   matchesTrackingRow, getDistinctProjects,
 } from '@/lib/db/tracking-repo';
 
@@ -87,7 +87,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const month = monthParam ? parseInt(monthParam, 10) : null;
   const year  = yearParam  ? parseInt(yearParam,  10) : null;
   const hasPeriod = month !== null && year !== null && month >= 1 && month <= 12 && year > 0;
-  const trackingRows = readAll();
+  const trackingRows = readActive();
   const submissions  = findAll();
 
   // Parse AI identifiers from each submission's validationResult
@@ -107,14 +107,36 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const entries: UserListEntry[] = [];
   const matchedSubmissionIds = new Set<number>();
 
+  /** Pick the most recent submission (latest submissionDate wins). */
+  function pickBest<T extends { id: number; status: string; submissionDate: string }>(list: T[]): T {
+    return list.slice().sort((a, b) =>
+      new Date(b.submissionDate).getTime() - new Date(a.submissionDate).getTime()
+    )[0];
+  }
+
+  // Build a normalised lookup of ALL tracking member identifiers (including removed ones)
+  // so we can suppress unlinked-submission rows whose owner is already known to the system.
+  function normStr(v: string | null | undefined) { return (v ?? '').trim().toLowerCase(); }
+  const trackingIdentifiers = new Set<string>();
+  for (const row of readAll()) {          // readAll = active + removed
+    if (row.account) trackingIdentifiers.add(normStr(row.account));
+    if (row.email)   trackingIdentifiers.add(normStr(row.email));
+    if (row.serial)  trackingIdentifiers.add(normStr(row.serial));
+  }
+
   for (const row of trackingRows) {
-    const match = parsedSubs.find(s =>
+    // Collect ALL submissions matching this tracking row (case-insensitive account + serial)
+    const allMatches = parsedSubs.filter(s =>
       !matchedSubmissionIds.has(s.id) &&
       matchesTrackingRow(row, s.deviceSerial, s.deviceName, s.account)
     );
 
-    if (match) {
-      matchedSubmissionIds.add(match.id);
+    if (allMatches.length > 0) {
+      // Mark every match so none appear as unlinked submissions
+      for (const m of allMatches) matchedSubmissionIds.add(m.id);
+
+      // Display only the best submission for this member
+      const best = pickBest(allMatches);
       entries.push({
         source: 'both',
         trackingRowNum: row.id,
@@ -132,15 +154,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         followUpAction: row.followUpAction ?? undefined,
         responseFromTicket: row.responseFromTicket ?? undefined,
         trackingStatus: row.trackingStatus ?? undefined,
-        submissionId: match.id,
-        account: match.account,
-        submissionType: match.submissionType,
-        submissionStatus: match.status,
-        submissionDate: match.submissionDate,
-        imageUrl: match.imageUrl,
-        confidenceScore: match.confidenceScore,
-        deviceSerial: match.deviceSerial ?? undefined,
-        deviceName: match.deviceName ?? undefined,
+        submissionId: best.id,
+        account: best.account,
+        submissionType: best.submissionType,
+        submissionStatus: best.status,
+        submissionDate: best.submissionDate,
+        imageUrl: best.imageUrl,
+        confidenceScore: best.confidenceScore,
+        deviceSerial: best.deviceSerial ?? undefined,
+        deviceName: best.deviceName ?? undefined,
       });
     } else {
       entries.push({
@@ -167,25 +189,33 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   // Submissions without a matching tracking row
   for (const s of parsedSubs) {
-    if (!matchedSubmissionIds.has(s.id)) {
-      entries.push({
-        source: 'submission',
-        name: s.deviceName ?? s.account,
-        account: s.account,
-        submissionId: s.id,
-        submissionType: s.submissionType,
-        submissionStatus: s.status,
-        submissionDate: s.submissionDate,
-        imageUrl: s.imageUrl,
-        confidenceScore: s.confidenceScore,
-        deviceSerial: s.deviceSerial ?? undefined,
-        deviceName: s.deviceName ?? undefined,
-        malwareAlerts: s.malwareAlerts,
-        complianceChecks: s.complianceCheck,
-        seedConfiguration: s.seedConfiguration,
-        operatingSystem: s.operatingSystem,
-      });
-    }
+    if (matchedSubmissionIds.has(s.id)) continue;
+
+    // If this submission's account / serial belongs to a known tracking member,
+    // it is already represented by that member's row — suppress the duplicate.
+    const normAccount = normStr(s.account);
+    const normSerial  = normStr(s.deviceSerial);
+    if (
+      (normAccount && trackingIdentifiers.has(normAccount)) ||
+      (normSerial  && trackingIdentifiers.has(normSerial))
+    ) continue;
+    entries.push({
+      source: 'submission',
+      name: s.deviceName ?? s.account,
+      account: s.account,
+      submissionId: s.id,
+      submissionType: s.submissionType,
+      submissionStatus: s.status,
+      submissionDate: s.submissionDate,
+      imageUrl: s.imageUrl,
+      confidenceScore: s.confidenceScore,
+      deviceSerial: s.deviceSerial ?? undefined,
+      deviceName: s.deviceName ?? undefined,
+      malwareAlerts: s.malwareAlerts,
+      complianceChecks: s.complianceCheck,
+      seedConfiguration: s.seedConfiguration,
+      operatingSystem: s.operatingSystem,
+    });
   }
 
   // 1. Project filter

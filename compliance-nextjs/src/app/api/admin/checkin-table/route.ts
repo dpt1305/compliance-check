@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { findAll } from '@/lib/db/submission-repo';
-import { readAll as readTrackingRows } from '@/lib/db/tracking-repo';
+import { readActive as readTrackingRows } from '@/lib/db/tracking-repo';
 
 export async function GET(): Promise<NextResponse> {
   const submissions  = findAll();

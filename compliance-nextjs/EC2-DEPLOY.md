@@ -200,11 +200,21 @@ Fill in the required values:
 
 | Variable | What to put |
 |---|---|
+| `SQLITE_DB_PATH` | Absolute path for the SQLite DB — **required** to survive redeploys (see below) |
 | `STORAGE_IMAGE_BASE_URL` | `https://your-domain.com/api/images/` |
 | `AWS_S3_BUCKET` | Your S3 bucket name, e.g. `my-compliance-images` |
 | `JWT_SECRET` | Output of `openssl rand -hex 32` |
 | `GEMINI_API_KEY` | Your AI API key |
 | `CHATGPT_API_KEY` | Your AI API key |
+
+> **`SQLITE_DB_PATH` — critical for data persistence.**  
+> Without an absolute path the SQLite file resolves to `./data/compliance.db` relative to `process.cwd()`.  
+> On a standalone Next.js build the working directory can change between restarts, causing the DB to be  
+> created in `.next/standalone/data/` which **gets wiped on every `npm run build`**.  
+> Set it to the absolute path of a directory that is **outside** the `.next/` folder:
+> ```env
+> SQLITE_DB_PATH=/home/ubuntu/compliance-check/compliance-nextjs/data/compliance.db
+> ```
 
 > **AWS credentials — do not add them.**  
 > `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are intentionally absent from `.env.production`.  
@@ -530,8 +540,9 @@ If this fails, the IAM role isn't attached correctly (Step 6).
 
 | Data | Path |
 |---|---|
-| Submissions JSON | `/home/ubuntu/compliance-app/compliance-nextjs/data/submissions.json` |
-| Admin credentials | `/home/ubuntu/compliance-app/compliance-nextjs/data/admins.json` |
+| **SQLite database** | Value of `SQLITE_DB_PATH` — e.g. `.../data/compliance.db` |
+| Submissions JSON (legacy) | `/home/ubuntu/compliance-app/compliance-nextjs/data/submissions.json` |
+| Admin credentials (legacy) | `/home/ubuntu/compliance-app/compliance-nextjs/data/admins.json` |
 | Tracking Excel | `/home/ubuntu/compliance-app/compliance-nextjs/data/tracking.xlsx` |
 | Images | S3 bucket `my-compliance-images/images/` |
 | PM2 logs | `~/.pm2/logs/` |
