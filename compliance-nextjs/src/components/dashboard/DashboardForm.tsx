@@ -5,6 +5,20 @@ import ValidationGuidance from './ValidationGuidance';
 import ValidationResult from './ValidationResult';
 import Link from 'next/link';
 
+const TYPE_SAMPLE_IMAGES: Record<string, string> = {
+  windows: '/window_sample.png',
+  mac: '/macos_sample.png',
+  thin: '/thin_sample.png',
+};
+
+function sampleImageSrcdoc(src: string) {
+  return `<!DOCTYPE html><html><head><style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{background:#f9fafb;display:flex;align-items:flex-start;justify-content:center;min-height:100vh}
+    img{width:100%;height:auto;display:block;cursor:zoom-in}
+  </style></head><body><img src="${src}" /></body></html>`;
+}
+
 type MemberRow = {
   no: number | null;
   project: string | null;
@@ -163,7 +177,7 @@ export default function DashboardForm() {
   const formInvalid = !!accountError || !submissionType || !file || !!fileError || fileValidating;
 
   return (
-    <div className="max-w-2xl mx-auto p-6">
+    <div className="max-w-5xl mx-auto p-6">
       {/* Toast */}
       {toast && (
         <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded shadow-lg text-sm font-medium transition-all ${toast.ok ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
@@ -215,6 +229,24 @@ export default function DashboardForm() {
 
           {/* Validation guidance */}
           {submissionType && <ValidationGuidance submissionType={submissionType} />}
+
+          {/* Sample image */}
+          {submissionType && TYPE_SAMPLE_IMAGES[submissionType.toLowerCase()] && (
+            <div className="form-field">
+              <label className="form-label">Sample Reference Image</label>
+              <div className="rounded-lg border border-gray-200 overflow-hidden bg-gray-50">
+                <iframe
+                  srcDoc={sampleImageSrcdoc(TYPE_SAMPLE_IMAGES[submissionType.toLowerCase()])}
+                  title={`${submissionType} sample`}
+                  className="w-full"
+                  style={{ height: '480px', border: 'none' }}
+                />
+                <p className="text-xs text-gray-500 py-1.5 text-center border-t border-gray-200">
+                  Example of a valid <span className="font-semibold capitalize">{submissionType}</span> submission — scroll or pinch to zoom
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Image Upload */}
           <div className="form-field">

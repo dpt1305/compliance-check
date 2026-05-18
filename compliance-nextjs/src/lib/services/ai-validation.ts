@@ -51,20 +51,34 @@ Respond ONLY with valid JSON (no markdown):
 
 const MAC_PROMPT = `You are a compliance image validator for macOS device verification.
 
+IMPORTANT RULES — follow these strictly:
+- You MUST ONLY check the items listed below. Do NOT invent additional checks.
+- Do NOT validate or question the macOS version number (e.g. macOS 26, Tahoe, Sequoia — any version is acceptable).
+- Do NOT check for Trellix if the SEED dashboard is present (paths are mutually exclusive).
+- Do NOT add failedChecks for anything not in the checklist below.
+
+Choose ONE of the following paths based on what is visible in the image:
+
 PATH 1 — SEED Dashboard (preferred):
-1. SEED DASHBOARD with full device name, serial number, and 4+ counters
-2. TIMESTAMP — readable timestamp in top-right corner
-Result: valid=true if BOTH present.
+  Check A: hasSeedDashboard — SEED dashboard is visible with device name, serial number, and 4+ metric counters (any numeric values are fine, including 0).
+  Check B: hasTimestamp — A readable date or time is visible ANYWHERE in the image (menu bar, page footer, browser, system clock, etc.).
+  → If Check A AND Check B pass: valid=true. Do NOT check for Trellix.
 
-PATH 2 — Trellix Fallback:
-1. TRELLIX — showing "trellix status: ok"
-Result: valid=true if Trellix shows ok.
+PATH 2 — Trellix Fallback (only if no SEED dashboard):
+  Check C: hasTrellix — Trellix endpoint security app is visible showing "trellix status: ok" or "turned on".
+  → If Check C passes: valid=true.
 
-For each checklist item set to false, add a clear description to "failedChecks" explaining exactly what is missing or wrong.
-If confidence < 100, every reason for uncertainty must appear in "failedChecks".
+PATH logic:
+- If hasSeedDashboard=true → evaluate PATH 1 only (ignore hasTrellix entirely, set it to false).
+- If hasSeedDashboard=false → evaluate PATH 2 only.
+
+ALSO EXTRACT: deviceName and deviceSerial from anywhere visible in the image.
+
+For each checklist item set to false that is REQUIRED for the chosen path, add a clear description to "failedChecks".
+Do NOT add failedChecks for items that are not required on the chosen path.
 
 Respond ONLY with valid JSON (no markdown):
-{"valid":true,"matchesType":true,"confidence":85,"reason":"...","checklist":{"hasSeedDashboard":true,"hasTrellix":false,"hasTimestamp":true,"hasMacInfo":true},"failedChecks":[],"guidelines":[],"suggestion":null}`;
+{"valid":true,"matchesType":true,"confidence":85,"reason":"...","deviceName":"...","deviceSerial":"...","checklist":{"hasSeedDashboard":true,"hasTrellix":false,"hasTimestamp":true,"hasMacInfo":true},"failedChecks":[],"guidelines":[],"suggestion":null}`;
 
 const THIN_PROMPT = `You are a compliance image validator for thin client (Windows) device verification.
 
