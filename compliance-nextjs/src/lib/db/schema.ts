@@ -74,8 +74,21 @@ export const admins = sqliteTable('admins', {
   active:   integer('active', { mode: 'boolean' }).notNull().default(true),
 });
 
+// ── Attendance (from external attendance system) ──────────────────────────
+export const attendance = sqliteTable('attendance', {
+  id:        integer('id').primaryKey({ autoIncrement: true }),
+  date:      text('date').notNull(),       // ISO date "YYYY-MM-DD"
+  time:      text('time').notNull(),       // "HH:MM" or "HH:MM:SS"
+  session:   text('session').notNull(),    // "AM" | "PM"
+  accountId: text('account_id').notNull(),
+  status:    text('status').notNull(),     // "ATTEND" | "LATE" | "ABSENT"
+  remark:    text('remark'),
+  createdAt: text('created_at').notNull(),
+});
+
 // ── Meta (version counter, replaces file mtime polling) ───────────────────
 export const meta = sqliteTable('_meta', {
   key:   text('key').primaryKey(),
   value: text('value').notNull(),
 });
+
