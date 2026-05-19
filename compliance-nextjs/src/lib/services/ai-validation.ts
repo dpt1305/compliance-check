@@ -32,60 +32,60 @@ const WINDOWS_PROMPT = `You are a compliance image validator for Windows device 
 
 The submitted screenshot MUST satisfy ALL of the following checks. Every single check must pass for valid=true and confidence=100.
 
-1. CLOCK — A date or time is visible anywhere on screen.
+1. SEED DASHBOARD — The SEED dashboard is clearly visible showing the device name, device serial number, and all 4 metric counters: Malware Alerts, Compliance Checks, SEED Configuration, and Operating System (any numeric values including 0 are acceptable).
+
+2. CLOCK — A date or time is visible anywhere on screen.
    Detection rule: Look at the ENTIRE image for any readable time (e.g. "4:08 PM", "08:52 AM", "16:08") or any readable date (e.g. "5/15/2026", "12 Dec 2025", "15/05/2026"). This includes: Windows taskbar bottom-right, page footers, browser tab timestamps, Settings headers, or any other UI element. If you can read ANY time or date text anywhere in the image — even in small text — set hasClock=true. Only set hasClock=false if there is truly zero readable date or time anywhere in the entire image.
 
-2. UPDATE — Windows Update screen is visible showing "You're up to date" or an equivalent completion message.
+3. UPDATE — Windows Update screen is visible showing "You're up to date" or an equivalent completion message.
 
-3. DEVICE NAME — Device name is clearly visible anywhere in the screenshot (SEED Dashboard device info, Settings, title bar, system info, etc.).
+4. DEVICE NAME — Device name is clearly visible anywhere in the screenshot (SEED Dashboard device info, Settings, title bar, system info, etc.).
 
-4. DEVICE SERIAL — Device serial number is clearly visible anywhere in the screenshot (SEED Dashboard, system info, Settings, etc.).
+5. DEVICE SERIAL — Device serial number is clearly visible anywhere in the screenshot (SEED Dashboard, system info, Settings, etc.).
 
-ALL four checks must pass for valid=true. If even one fails, set valid=false and list only the actually failing items in failedChecks.
+ALL five checks must pass for valid=true. If even one fails, set valid=false and list only the actually failing items in failedChecks.
 
 ALSO EXTRACT: device serial number and device name visible anywhere in the screenshot.
-seedDashboard counter values MUST be plain integers (e.g. 4, 19, 0) — no units or labels.
+SEED DASHBOARD COUNTERS: If hasDashboard=true, read the 4 numeric counter values from the SEED dashboard tiles and populate seedDashboard. Values MUST be plain integers (e.g. 4, 19, 0) — no units or labels.
+- malwareAlerts: integer shown in the "Malware Alerts" tile
+- complianceChecks: integer shown in the "Compliance Checks" tile
+- seedConfiguration: integer shown in the "SEED Configuration" tile
+- operatingSystem: integer shown in the "Operating System" tile
+If hasDashboard=false, set seedDashboard fields to null.
 
 Respond ONLY with valid JSON (no markdown):
-{"valid":true,"matchesType":true,"confidence":100,"reason":"...","deviceSerial":"...","deviceName":"...","seedDashboard":{"malwareAlerts":null,"complianceChecks":null,"seedConfiguration":null,"operatingSystem":null},"checklist":{"hasClock":true,"hasWindowsUpdate":true,"hasDeviceName":true,"hasDeviceSerial":true,"hasDashboard":false},"failedChecks":[],"guidelines":[],"suggestion":null}`;
+{"valid":true,"matchesType":true,"confidence":100,"reason":"...","deviceSerial":"...","deviceName":"...","seedDashboard":{"malwareAlerts":0,"complianceChecks":0,"seedConfiguration":0,"operatingSystem":0},"checklist":{"hasDashboard":true,"hasClock":true,"hasWindowsUpdate":true,"hasDeviceName":true,"hasDeviceSerial":true},"failedChecks":[],"guidelines":[],"suggestion":null}`;
 
 const MAC_PROMPT = `You are a compliance image validator for macOS device verification.
+
+The submitted screenshot MUST satisfy ALL of the following checks. Every single check must pass for valid=true.
 
 IMPORTANT RULES — follow these strictly:
 - You MUST ONLY check the items listed below. Do NOT invent additional checks.
 - Do NOT validate or question the macOS version number (e.g. macOS 26, Tahoe, Sequoia — any version is acceptable).
-- Do NOT check for Trellix if the SEED dashboard is present (paths are mutually exclusive).
-- Do NOT add failedChecks for anything not in the checklist below.
+- Do NOT check for Trellix — it is not required.
 
-Choose ONE of the following paths based on what is visible in the image:
+1. SEED DASHBOARD — The SEED dashboard is clearly visible showing the device name, device serial number, and all 4 metric counters: Malware Alerts, Compliance Checks, SEED Configuration, and Operating System (any numeric values including 0 are acceptable).
 
-PATH 1 — SEED Dashboard (preferred):
-  Check A: hasSeedDashboard — SEED dashboard is visible with device name, serial number, and 4+ metric counters (any numeric values are fine, including 0).
-  Check B: hasTimestamp — A readable date or time is visible ANYWHERE in the image (menu bar, page footer, browser, system clock, etc.).
-  → If Check A AND Check B pass: valid=true. Do NOT check for Trellix.
+2. TIMESTAMP — A readable date or time is visible ANYWHERE in the image. Look at the entire image: menu bar clock, browser tab, page footer, system clock, any UI element. If ANY readable time or date text is found anywhere — set hasTimestamp=true. Only set hasTimestamp=false if there is truly zero readable date or time in the entire image.
 
-PATH 2 — Trellix Fallback (only if no SEED dashboard):
-  Check C: hasTrellix — Trellix endpoint security app is visible showing "trellix status: ok" or "turned on".
-  → If Check C passes: valid=true.
+3. MAC SYSTEM INFO — macOS system info is visible (System Preferences / System Settings → About This Mac or equivalent) showing at least the model name and serial number.
 
-PATH logic:
-- If hasSeedDashboard=true → evaluate PATH 1 only (ignore hasTrellix entirely, set it to false).
-- If hasSeedDashboard=false → evaluate PATH 2 only.
+ALL three checks must pass for valid=true. If even one fails, set valid=false and list only the actually failing items in failedChecks.
 
 ALSO EXTRACT: deviceName and deviceSerial from anywhere visible in the image.
 
-SEED DASHBOARD COUNTERS (PATH 1 only): If hasSeedDashboard=true, read the 4 numeric counter values shown in the SEED dashboard tiles and populate seedDashboard. These are plain integer counts (e.g. 0, 3, 12). Do NOT copy the device serial number or any other text — only the integer value shown inside each metric tile.
+SEED DASHBOARD COUNTERS: If hasSeedDashboard=true, read the 4 numeric counter values from the SEED dashboard tiles and populate seedDashboard. Values MUST be plain integers (e.g. 4, 19, 0) — no units or labels.
 - malwareAlerts: integer shown in the "Malware Alerts" tile
 - complianceChecks: integer shown in the "Compliance Checks" tile
 - seedConfiguration: integer shown in the "SEED Configuration" tile
 - operatingSystem: integer shown in the "Operating System" tile
 If hasSeedDashboard=false, set seedDashboard to null.
 
-For each checklist item set to false that is REQUIRED for the chosen path, add a clear description to "failedChecks".
-Do NOT add failedChecks for items that are not required on the chosen path.
+For each checklist item set to false, add a clear description to "failedChecks" explaining exactly what is missing.
 
 Respond ONLY with valid JSON (no markdown):
-{"valid":true,"matchesType":true,"confidence":85,"reason":"...","deviceName":"...","deviceSerial":"...","seedDashboard":{"malwareAlerts":0,"complianceChecks":0,"seedConfiguration":0,"operatingSystem":0},"checklist":{"hasSeedDashboard":true,"hasTrellix":false,"hasTimestamp":true,"hasMacInfo":true},"failedChecks":[],"guidelines":[],"suggestion":null}`;
+{"valid":true,"matchesType":true,"confidence":100,"reason":"...","deviceName":"...","deviceSerial":"...","seedDashboard":{"malwareAlerts":0,"complianceChecks":0,"seedConfiguration":0,"operatingSystem":0},"checklist":{"hasSeedDashboard":true,"hasTimestamp":true,"hasMacInfo":true},"failedChecks":[],"guidelines":[],"suggestion":null}`;
 
 const THIN_PROMPT = `You are a compliance image validator for thin client (Windows) device verification.
 
