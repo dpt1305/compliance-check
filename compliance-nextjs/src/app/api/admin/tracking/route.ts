@@ -6,7 +6,10 @@ import ExcelJS from 'exceljs';
 import { trackingFilePath } from '@/lib/utils/tracking-path';
 import { readTrackingRows } from '@/lib/services/tracking-reader';
 import { findAll } from '@/lib/db/submission-repo';
+import type { Submission } from '@/lib/storage/json-storage';
 import { readAll as readTrackingDB, readActive as readActiveTrackingDB, replaceAll, mergeFromUpload, updateSeedFields } from '@/lib/db/tracking-repo';
+import type { TrackingMember } from '@/lib/db/tracking-repo';
+import { matchesTrackingRow } from '@/lib/db/tracking-repo';
 import { bumpTrackingVersion } from '@/lib/db/index';
 import { getImageBuffer } from '@/lib/utils/file-storage';
 
@@ -19,6 +22,58 @@ function isXlsxBuffer(buf: Buffer): boolean {
   return buf.length >= 4 &&
     buf[0] === 0x50 && buf[1] === 0x4B &&
     buf[2] === 0x03 && buf[3] === 0x04;
+}
+
+/**
+ * Derive the Tracking Status cell value from a submission's status:
+ *   APPROVED → "OK"
+ *   REJECTED → "Rejected"
+ *   anything else (PENDING / no submission) → "Rejected"
+ */
+function deriveTrackingStatus(submissionStatus: string | null | undefined): string {
+  if (submissionStatus?.toUpperCase() === 'APPROVED') return 'OK';
+  return 'Rejected';
+}
+
+/**
+ * Build a map of tracking-row DB id → best submission status for use in exports.
+ * "Best" = most recent; APPROVED always wins over PENDING/REJECTED for the same row.
+ */
+function buildRowStatusMap(
+  trackingRows: TrackingMember[],
+  submissions: Submission[],
+): Map<number, string> {
+  // Parse AI identifiers from each submission's validationResult (same as user-list route)
+  const parsedSubs = submissions.map(s => {
+    let deviceSerial: string | null = s.deviceSerial ?? null;
+    let deviceName: string | null = s.deviceName ?? null;
+    if (!deviceSerial || !deviceName) {
+      try {
+        const r = JSON.parse(s.validationResult ?? '{}') as { deviceSerial?: string; deviceName?: string };
+        deviceSerial ??= r.deviceSerial ?? null;
+        deviceName   ??= r.deviceName  ?? null;
+      } catch { /* ignore */ }
+    }
+    return { ...s, deviceSerial, deviceName };
+  });
+
+  const result = new Map<number, string>();
+
+  for (const row of trackingRows) {
+    const matches = parsedSubs.filter(s =>
+      matchesTrackingRow(row, s.deviceSerial, s.deviceName, s.account)
+    );
+    if (matches.length === 0) continue;
+
+    // Pick most recent submission; APPROVED beats any other status
+    const best = matches.sort((a, b) =>
+      new Date(b.submissionDate).getTime() - new Date(a.submissionDate).getTime()
+    ).find(s => s.status === 'APPROVED') ?? matches[0];
+
+    result.set(row.id, best.status);
+  }
+
+  return result;
 }
 
 interface FilteredMember {
@@ -68,6 +123,10 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ message: 'Tracking data not found on server' }, { status: 404 });
   }
 
+  // Build tracking-row-id → best submission status map
+  const allSubmissions = findAll();
+  const rowIdToStatus = buildRowStatusMap(rows, allSubmissions);
+
   // Generate fresh xlsx from DB rows
   const wb = new ExcelJS.Workbook();
   const sheet = wb.addWorksheet('Sheet1');
@@ -82,7 +141,7 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
       r.no ?? '', r.project ?? '', r.name ?? '', r.email ?? '', r.serial ?? '',
       r.account ?? '', r.deviceType ?? '', r.malwareAlerts ?? '', r.complianceChecks ?? '',
       r.seedConfiguration ?? '', r.operatingSystem ?? '', r.followUpAction ?? '',
-      r.responseFromTicket ?? '', r.trackingStatus ?? '',
+      r.responseFromTicket ?? '', deriveTrackingStatus(rowIdToStatus.get(r.id)),
     ]);
   }
 
@@ -170,6 +229,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ message: 'No members provided' }, { status: 400 });
     }
 
+    const allSubmissions = findAll();
+    const submissionById = new Map(allSubmissions.map(s => [s.id, s]));
+
     const hasDate = month !== undefined && year !== undefined &&
       !isNaN(month) && !isNaN(year) && month >= 1 && month <= 12 && year > 0;
 
@@ -192,20 +254,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           'Follow Up Action', 'Response From Ticket', 'Tracking Status']);
         for (const r of filteredDbRows) {
           const m = idToMember.get(r.id);
+          const sub = m?.submissionId ? submissionById.get(m.submissionId) : undefined;
           outSheet.addRow([
             m?.no ?? r.no ?? '', r.project ?? '', r.name ?? '', r.email ?? '',
             r.serial ?? '', r.account ?? '', r.deviceType ?? '',
             r.malwareAlerts ?? '', r.complianceChecks ?? '', r.seedConfiguration ?? '',
-            r.operatingSystem ?? '', r.followUpAction ?? '', r.responseFromTicket ?? '', r.trackingStatus ?? '',
+            r.operatingSystem ?? '', r.followUpAction ?? '', r.responseFromTicket ?? '',
+            deriveTrackingStatus(sub?.status),
           ]);
         }
         const xlsxBuf = await outWb.xlsx.writeBuffer();
         zip.addFile(`${baseName}.xlsx`, Buffer.from(xlsxBuf));
       }
     }
-
-    const allSubmissions = findAll();
-    const submissionById = new Map(allSubmissions.map(s => [s.id, s]));
 
     const periodSubs = hasDate
       ? allSubmissions.filter(s => {

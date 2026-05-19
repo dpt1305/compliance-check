@@ -35,6 +35,7 @@ export interface UserListEntry {
   confidenceScore?: number;
   deviceSerial?: string;
   deviceName?: string;
+  validationResult?: string;
 }
 
 export interface UserListResponse {
@@ -65,6 +66,7 @@ function applyPeriodMask(entry: UserListEntry, month: number, year: number): Use
     submissionStatus: 'NOT_SUBMITTED',
     submissionDate: undefined,
     imageUrl: undefined,
+    validationResult: undefined,
     deviceSerial: undefined,
     deviceName: undefined,
     malwareAlerts: '',
@@ -163,6 +165,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         confidenceScore: best.confidenceScore,
         deviceSerial: best.deviceSerial ?? undefined,
         deviceName: best.deviceName ?? undefined,
+        validationResult: best.validationResult ?? undefined,
       });
     } else {
       entries.push({
@@ -211,6 +214,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       confidenceScore: s.confidenceScore,
       deviceSerial: s.deviceSerial ?? undefined,
       deviceName: s.deviceName ?? undefined,
+      validationResult: s.validationResult ?? undefined,
       malwareAlerts: s.malwareAlerts,
       complianceChecks: s.complianceCheck,
       seedConfiguration: s.seedConfiguration,
