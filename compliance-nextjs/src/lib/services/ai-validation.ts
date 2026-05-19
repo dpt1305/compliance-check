@@ -7,10 +7,10 @@ export interface AiValidationResult {
   guidelines?: string[] | null;
   suggestion?: string | null;
   seedDashboard?: {
-    malwareAlerts?: string | null;
-    complianceChecks?: string | null;
-    seedConfiguration?: string | null;
-    operatingSystem?: string | null;
+    malwareAlerts?: string | number | null;
+    complianceChecks?: string | number | null;
+    seedConfiguration?: string | number | null;
+    operatingSystem?: string | number | null;
   } | null;
   deviceSerial?: string | null;
   deviceName?: string | null;
@@ -74,11 +74,18 @@ PATH logic:
 
 ALSO EXTRACT: deviceName and deviceSerial from anywhere visible in the image.
 
+SEED DASHBOARD COUNTERS (PATH 1 only): If hasSeedDashboard=true, read the 4 numeric counter values shown in the SEED dashboard tiles and populate seedDashboard. These are plain integer counts (e.g. 0, 3, 12). Do NOT copy the device serial number or any other text — only the integer value shown inside each metric tile.
+- malwareAlerts: integer shown in the "Malware Alerts" tile
+- complianceChecks: integer shown in the "Compliance Checks" tile
+- seedConfiguration: integer shown in the "SEED Configuration" tile
+- operatingSystem: integer shown in the "Operating System" tile
+If hasSeedDashboard=false, set seedDashboard to null.
+
 For each checklist item set to false that is REQUIRED for the chosen path, add a clear description to "failedChecks".
 Do NOT add failedChecks for items that are not required on the chosen path.
 
 Respond ONLY with valid JSON (no markdown):
-{"valid":true,"matchesType":true,"confidence":85,"reason":"...","deviceName":"...","deviceSerial":"...","checklist":{"hasSeedDashboard":true,"hasTrellix":false,"hasTimestamp":true,"hasMacInfo":true},"failedChecks":[],"guidelines":[],"suggestion":null}`;
+{"valid":true,"matchesType":true,"confidence":85,"reason":"...","deviceName":"...","deviceSerial":"...","seedDashboard":{"malwareAlerts":0,"complianceChecks":0,"seedConfiguration":0,"operatingSystem":0},"checklist":{"hasSeedDashboard":true,"hasTrellix":false,"hasTimestamp":true,"hasMacInfo":true},"failedChecks":[],"guidelines":[],"suggestion":null}`;
 
 const THIN_PROMPT = `You are a compliance image validator for thin client (Windows) device verification.
 

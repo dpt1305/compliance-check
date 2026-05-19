@@ -6,8 +6,8 @@ function norm(s: string | null | undefined): string {
   return (s ?? '').toLowerCase().trim();
 }
 
-/** Extract the first integer from any string. Returns '0' if none found. */
-function toNumberOnly(s: string | null | undefined): string {
+/** Extract the first integer from any string or number. Returns '0' if none found. */
+function toNumberOnly(s: string | number | null | undefined): string {
   if (s === null || s === undefined) return '0';
   const m = String(s).match(/\d+/);
   return m ? m[0] : '0';
