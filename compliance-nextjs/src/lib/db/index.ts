@@ -97,6 +97,21 @@ function createDb() {
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS attendance (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      date        TEXT NOT NULL,
+      time        TEXT NOT NULL,
+      session     TEXT NOT NULL,
+      account_id  TEXT NOT NULL,
+      status      TEXT NOT NULL,
+      remark      TEXT,
+      created_at  TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance (date);
+    CREATE INDEX IF NOT EXISTS idx_attendance_account ON attendance (account_id);
+    CREATE INDEX IF NOT EXISTS idx_attendance_date_account ON attendance (date, account_id);
   `);
 
   // Seed meta version counter if missing
