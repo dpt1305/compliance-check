@@ -4,6 +4,46 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.3.0] — 2026-05-19
+
+### Added
+
+#### Admin Review Modal
+- New **🔍 Review (N)** button in the admin User List toolbar (next to the Reload button)
+- `N` shows the true total submitted count from the API summary — always accurate regardless of scroll position
+- Clicking opens a full-screen review modal that covers all submissions matching the current filter
+- **Left pane** displays all submission data:
+  - Member info (name, email, project, serial, device type)
+  - Submission metadata (type, date, AI confidence score)
+  - **SEED dashboard tiles** — 2×2 colored grid (teal = 0 good, amber = >0 attention, gray = no data); click any tile to edit inline, Enter saves, Escape cancels, blur auto-saves
+  - AI reason, compliance checklist (pass/fail badges), failed checks, guidelines, AI suggestion
+- **Right pane** shows the submission image at full size (`object-fit: contain`, dark background) so admins can assess at a glance
+- **Footer action buttons**: ⏸ Pending / ✕ Reject / ✓ Approve — updates submission status immediately
+- **Navigation**: left/right arrow buttons on modal edges + keyboard `←` / `→` / `Esc`
+- SEED tile edits sync back to `PUT /api/admin/tracking` and update both the paginated list and full review list
+- `validationResult` field added to `UserListEntry` interface and `GET /api/admin/user-list` response — enables the modal to show AI checklist data without a second API call
+
+#### Excel Export — Derived Status Column
+- Exported tracking Excel now derives the `Status` column from actual submission status:
+  - `APPROVED` → `"OK"`
+  - Any other status or no submission → `"Rejected"`
+- Applies to both full GET export and filtered POST ZIP export
+- `buildRowStatusMap()` helper joins tracking rows to submissions using the same `matchesTrackingRow` normalisation as the user-list route
+
+### Changed
+
+- **Mac SEED detection fix** — `MAC_PROMPT` now explicitly requests `seedDashboard` integers (seedConfiguration, seedOs, seedMalware, seedNetwork) directly from the SEED tile UI values, with an explicit instruction not to copy the device serial number. Prevents regression where serial digits (e.g. `L4YPY29KJJ` → `29`) were incorrectly matched to SEED keyword patterns in the free-text `reason` field
+- **SEED value display** — added `numOnly()` helper that strips suffix text (e.g. `"29 actions"` → `"29"`) in all 4 SEED table columns and in the review modal tiles
+- **Submission form placeholder** — Account ID input placeholder updated to `"e.g. HuyenTP"` to give users a realistic format example
+- **Review modal image** — switched from `<iframe>` to `<img object-fit: contain>` with dark background so the full image is visible at 100% without browser chrome or scrollbars
+
+### Fixed
+
+- `AiValidationResult` `seedDashboard` field types widened to `string | number | null` to handle AI responses that return integer tile values as strings
+- `toNumberOnly()` in `excel-update.ts` signature widened to accept `string | number | null | undefined`
+
+---
+
 ## [0.2.0] — 2026-05-14
 
 ### Added

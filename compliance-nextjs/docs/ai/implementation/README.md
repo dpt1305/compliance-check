@@ -169,3 +169,119 @@ Windows screenshot validation requires **4 items** — the Trellix security stat
 - Upload content validation with magic-byte checks to prevent disguised files.
 - Path traversal protection in image serving/storage helpers.
 - Secrets sourced from environment variables.
+
+---
+
+## Mac SEED Dashboard Detection Fix
+
+### Problem
+Mac submissions were returning incorrect SEED metric values — e.g., `seedConfiguration` reporting `29` instead of `0`. The device serial number `L4YPY29KJJ` contained digits that were extracted from the free-text `reason` string when `buildSeedValues()` fell back to regex matching.
+
+### Root Cause
+`MAC_PROMPT` did not explicitly ask the AI to return `seedDashboard` integer values. `buildSeedValues()` in `excel-update.ts` fell back to `extractNumber(reason, keywords)` which scanned the free-text `reason` field — where the serial number digits appeared near SEED-related keywords.
+
+### Fix
+- **`ai-validation.ts`** — `MAC_PROMPT` now explicitly requests all four `seedDashboard` integers (`seedConfiguration`, `seedOs`, `seedMalware`, `seedNetwork`) from the SEED tile UI, with a warning: _"Do NOT copy values from the device serial number"_.
+- **`AiValidationResult` interface** — `seedDashboard` field types widened from `number | null` to `string | number | null` to accept AI responses that return them as strings.
+- **`excel-update.ts`** — `toNumberOnly()` signature widened to accept `string | number | null | undefined`.
+
+---
+
+## Admin Review Modal
+
+A full-screen review flow was added to the admin User List so admins can quickly assess and approve/reject all submissions without leaving the page.
+
+### Location
+`src/components/admin/UserList.tsx`
+
+### Feature Details
+
+#### Toolbar Button
+- A **🔍 Review (N)** button sits in the toolbar row next to the Reload button.
+- `N` reflects `summary.submitted` from the API — always the true total count for the active filter, not limited to the current scroll position.
+- Clicking it opens the review modal starting at the first submission.
+
+#### Review Modal Layout
+- **Left pane (w-80)** — submission metadata + SEED dashboard tiles + AI validation output:
+  - Member info (name, email, project, serial, device type)
+  - Submission meta (type, date, confidence score)
+  - **SEED dashboard** — 2×2 colored tile grid:
+    - Teal background → value is `0` (good)
+    - Amber background → value is `> 0` (needs attention)
+    - Gray background → no data
+    - Click any tile to edit inline; Enter saves, Escape cancels, blur auto-saves
+    - Saves via `PUT /api/admin/tracking` and updates both the paginated list and review list
+  - AI reason text
+  - Compliance checklist (pass/fail badges)
+  - Failed checks list
+  - Guidelines list
+  - AI suggestion tip
+- **Right pane** — full-size image viewer:
+  - Uses `<img>` with `object-fit: contain` on a dark (`bg-gray-900`) background
+  - Image fills the full available pane at 100% without cropping
+  - "↗" link in the header opens the image in a new tab for detailed zoom
+
+#### Navigation
+- Left/right arrow buttons on the sides of the modal
+- Keyboard `←` / `→` navigate between submissions
+- Keyboard `Esc` closes the modal (or cancels a SEED tile edit if one is active)
+- While a SEED tile is being edited, arrow/Esc navigation is blocked until the edit is committed or cancelled
+
+#### Status Actions (footer)
+Three buttons in the modal footer update submission status:
+| Button | Status set | Color |
+|---|---|---|
+| ⏸ Pending | `PENDING` | Amber |
+| ✕ Reject | `REJECTED` | Red |
+| ✓ Approve | `APPROVED` | Green |
+
+The current status is reflected as a badge in the modal header. Already-active status buttons are disabled.
+
+#### Double-Save Prevention
+`seedSavingRef` (a `useRef<boolean>`) is set synchronously before any async work in `saveSeedField`. This prevents the race condition where pressing Enter (triggering save) and the resulting blur event both call `saveSeedField` simultaneously.
+
+---
+
+## Excel Export — Status Column Logic
+
+**File:** `src/app/api/admin/tracking/route.ts`
+
+The exported tracking Excel now derives the `Status` column value from the actual submission status rather than a raw stored field:
+
+| Submission status | Exported Status value |
+|---|---|
+| `APPROVED` | `OK` |
+| `REJECTED` / `PENDING` / none | `Rejected` |
+
+### Implementation
+- `deriveTrackingStatus(submissionStatus)` helper converts status strings.
+- `buildRowStatusMap(trackingRows, submissions)` joins tracking rows to submissions using `matchesTrackingRow` (same normalised account/serial matching used in the user-list route).
+- Both the GET (full export) and POST (filtered ZIP) paths use the derived status.
+- Rows with no matching submission → status defaults to `"Rejected"`.
+
+---
+
+## SEED Numeric Value Display
+
+SEED values stored in the tracking DB may contain suffixes like `"29 actions"` or `"0 actions"` from older data. A `numOnly(v)` helper extracts only the first integer:
+
+```ts
+function numOnly(v: unknown): string | null {
+  if (v == null || v === '') return null;
+  const m = String(v).match(/\d+/);
+  return m ? m[0] : null;
+}
+```
+
+Applied in:
+- All 4 SEED column `renderCell` calls in the user list table
+- SEED tile display and `parseInt` color logic in the review modal
+- SEED tile pre-fill value when clicking to edit
+
+---
+
+## Submission Form UX
+
+**File:** `src/components/dashboard/DashboardForm.tsx`
+
+The Account ID input placeholder was updated to `"e.g. HuyenTP"` to give users a realistic example format.
