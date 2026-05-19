@@ -8,6 +8,7 @@ interface GuidanceItem {
 }
 
 const WINDOWS_CHECKLIST: GuidanceItem[] = [
+  { title: 'SEED Dashboard', description: 'SEED dashboard visible showing device name, serial number, and 4+ metric counters (Malware Alerts, Compliance Checks, SEED Configuration, Operating System)', icon: '📊', required: true },
   { title: 'System Clock', description: 'Timestamp visible in bottom-right corner of Windows taskbar', icon: '🕐', required: true },
   { title: 'Windows Update Status', description: "Windows Update screen showing \"You're up to date\"", icon: '🔄', required: true },
   { title: 'Device Name', description: 'Computer hostname fully readable (not truncated) anywhere on screen', icon: '💻', required: true },
@@ -47,7 +48,7 @@ export default function ValidationGuidance({ submissionType }: Props) {
 
   const guidanceText =
     type === 'windows'
-      ? 'All 4 items above must be visible in your screenshot for approval.'
+      ? 'All 5 items above must be visible in your screenshot for approval. SEED dashboard is required.'
       : type === 'thin'
         ? 'All 8 items above must be present in your screenshot(s) for approval. You may capture multiple screens.'
         : 'Provide either: (1) SEED dashboard + timestamp, OR (2) System info + timestamp, OR (3) Trellix status showing "ok"';
@@ -88,10 +89,11 @@ export default function ValidationGuidance({ submissionType }: Props) {
         <ul className="text-xs text-gray-600 space-y-1 list-disc list-inside">
           {type === 'windows' && (
             <>
-              <li>You can capture multiple windows or tabs if needed to show all required elements</li>
+              <li><strong>SEED dashboard is required</strong> — open the SEED app and capture the dashboard showing all 4 metric counters</li>
+              <li>The SEED dashboard should display device name, serial number, Malware Alerts, Compliance Checks, SEED Configuration, and Operating System counters</li>
               <li>Make sure device name and serial are <strong>fully visible</strong> (not cut off with &quot;...&quot;)</li>
-              <li>SEED dashboard, System Properties, or Device Manager can show device info</li>
-              <li>Settings &gt; System &gt; About or Device Manager shows system info and clock</li>
+              <li>You can capture multiple windows or tabs if needed to show all required elements</li>
+              <li>Settings &gt; System &gt; About or the SEED dashboard can show device name and serial</li>
             </>
           )}
           {type === 'mac' && (

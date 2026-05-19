@@ -32,22 +32,29 @@ const WINDOWS_PROMPT = `You are a compliance image validator for Windows device 
 
 The submitted screenshot MUST satisfy ALL of the following checks. Every single check must pass for valid=true and confidence=100.
 
-1. CLOCK — A date or time is visible anywhere on screen.
+1. SEED DASHBOARD — The SEED dashboard is clearly visible showing the device name, device serial number, and all 4 metric counters: Malware Alerts, Compliance Checks, SEED Configuration, and Operating System (any numeric values including 0 are acceptable).
+
+2. CLOCK — A date or time is visible anywhere on screen.
    Detection rule: Look at the ENTIRE image for any readable time (e.g. "4:08 PM", "08:52 AM", "16:08") or any readable date (e.g. "5/15/2026", "12 Dec 2025", "15/05/2026"). This includes: Windows taskbar bottom-right, page footers, browser tab timestamps, Settings headers, or any other UI element. If you can read ANY time or date text anywhere in the image — even in small text — set hasClock=true. Only set hasClock=false if there is truly zero readable date or time anywhere in the entire image.
 
-2. UPDATE — Windows Update screen is visible showing "You're up to date" or an equivalent completion message.
+3. UPDATE — Windows Update screen is visible showing "You're up to date" or an equivalent completion message.
 
-3. DEVICE NAME — Device name is clearly visible anywhere in the screenshot (SEED Dashboard device info, Settings, title bar, system info, etc.).
+4. DEVICE NAME — Device name is clearly visible anywhere in the screenshot (SEED Dashboard device info, Settings, title bar, system info, etc.).
 
-4. DEVICE SERIAL — Device serial number is clearly visible anywhere in the screenshot (SEED Dashboard, system info, Settings, etc.).
+5. DEVICE SERIAL — Device serial number is clearly visible anywhere in the screenshot (SEED Dashboard, system info, Settings, etc.).
 
-ALL four checks must pass for valid=true. If even one fails, set valid=false and list only the actually failing items in failedChecks.
+ALL five checks must pass for valid=true. If even one fails, set valid=false and list only the actually failing items in failedChecks.
 
 ALSO EXTRACT: device serial number and device name visible anywhere in the screenshot.
-seedDashboard counter values MUST be plain integers (e.g. 4, 19, 0) — no units or labels.
+SEED DASHBOARD COUNTERS: If hasDashboard=true, read the 4 numeric counter values from the SEED dashboard tiles and populate seedDashboard. Values MUST be plain integers (e.g. 4, 19, 0) — no units or labels.
+- malwareAlerts: integer shown in the "Malware Alerts" tile
+- complianceChecks: integer shown in the "Compliance Checks" tile
+- seedConfiguration: integer shown in the "SEED Configuration" tile
+- operatingSystem: integer shown in the "Operating System" tile
+If hasDashboard=false, set seedDashboard fields to null.
 
 Respond ONLY with valid JSON (no markdown):
-{"valid":true,"matchesType":true,"confidence":100,"reason":"...","deviceSerial":"...","deviceName":"...","seedDashboard":{"malwareAlerts":null,"complianceChecks":null,"seedConfiguration":null,"operatingSystem":null},"checklist":{"hasClock":true,"hasWindowsUpdate":true,"hasDeviceName":true,"hasDeviceSerial":true,"hasDashboard":false},"failedChecks":[],"guidelines":[],"suggestion":null}`;
+{"valid":true,"matchesType":true,"confidence":100,"reason":"...","deviceSerial":"...","deviceName":"...","seedDashboard":{"malwareAlerts":0,"complianceChecks":0,"seedConfiguration":0,"operatingSystem":0},"checklist":{"hasDashboard":true,"hasClock":true,"hasWindowsUpdate":true,"hasDeviceName":true,"hasDeviceSerial":true},"failedChecks":[],"guidelines":[],"suggestion":null}`;
 
 const MAC_PROMPT = `You are a compliance image validator for macOS device verification.
 
