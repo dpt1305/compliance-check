@@ -205,7 +205,7 @@ export default function DashboardForm() {
               className={`form-input ${account.trim() && accountError ? 'error' : ''}`}
               value={account}
               onChange={e => setAccount(e.target.value)}
-              placeholder="Enter your account ID"
+              placeholder="e.g. HuyenTP"
               autoComplete="off"
             />
             {account.trim() && accountError === 'required' && <span className="form-error">Account is required</span>}

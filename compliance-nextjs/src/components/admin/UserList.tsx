@@ -43,6 +43,7 @@ interface UserListEntry {
   confidenceScore?: number;
   deviceSerial?: string;
   deviceName?: string;
+  validationResult?: string;
 }
 
 // Fields that map to /api/admin/user-list PUT (identity columns)
@@ -131,8 +132,11 @@ function statusBadge(s: string | undefined) {
 function statusLabel(s: string | undefined) {
   return (!s || s === 'NOT_SUBMITTED') ? 'Not Submitted' : s;
 }
-function dash(v: string | null | undefined) {
-  return v && v !== '0 actions' ? <span>{v}</span> : <span className="text-gray-300">—</span>;
+/** Strip trailing "actions", "action", spaces etc. — return the bare integer string, or null. */
+function numOnly(v: string | null | undefined): string | null {
+  if (!v) return null;
+  const m = v.match(/\d+/);
+  return m ? m[0] : null;
 }
 
 /** Convert any stored imageUrl to a relative /api/images/… path so it works on any host/port. */
@@ -164,6 +168,14 @@ export default function UserList() {
 
   // Image viewer modal (opened by clicking a thumbnail)
   const [editRow, setEditRow] = useState<UserListEntry | null>(null);
+
+  // Review modal — index into the submissions-only sub-list
+  const [reviewIdx, setReviewIdx] = useState<number | null>(null);
+  const [isReviewSaving, setIsReviewSaving] = useState(false);
+  // SEED tile inline editing inside the review modal
+  const [reviewSeedEdit, setReviewSeedEdit] = useState<{ field: string; value: string } | null>(null);
+  const [isSeedSaving, setIsSeedSaving] = useState(false);
+  const seedSavingRef = useRef(false); // prevents double-save on Enter + blur
 
   // Inline cell editing
   const [editCell, setEditCell] = useState<{ row: UserListEntry; field: string } | null>(null);
@@ -285,6 +297,88 @@ export default function UserList() {
   function openImageViewer(row: UserListEntry) {
     setEditRow(row);
   }
+
+  // ── Review modal ─────────────────────────────────────────────────────────────
+  /** Items that have an actual submission (submissionId defined) */
+  const reviewItems = items.filter(r => r.submissionId !== undefined);
+
+  function openReview(row: UserListEntry) {
+    const idx = reviewItems.findIndex(r => r.submissionId === row.submissionId);
+    if (idx >= 0) setReviewIdx(idx);
+  }
+
+  function closeReview() { setReviewIdx(null); }
+
+  function reviewNavigate(delta: 1 | -1) {
+    setReviewIdx(prev => {
+      if (prev === null) return null;
+      const next = prev + delta;
+      if (next < 0 || next >= reviewItems.length) return prev;
+      return next;
+    });
+  }
+
+  async function reviewChangeStatus(status: 'APPROVED' | 'REJECTED' | 'PENDING') {
+    if (reviewIdx === null) return;
+    const row = reviewItems[reviewIdx];
+    if (!row.submissionId) return;
+    setIsReviewSaving(true);
+    try {
+      const res = await fetch(`/api/admin/submissions/${row.submissionId}`, {
+        method: 'PUT',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) throw new Error();
+      setItems(prev => prev.map(r =>
+        r.submissionId === row.submissionId ? { ...r, submissionStatus: status } : r
+      ));
+      showToast(`Status set to ${status}`, true);
+    } catch { showToast('Failed to update status', false); }
+    finally { setIsReviewSaving(false); }
+  }
+
+  async function saveSeedField(field: string, value: string) {
+    if (seedSavingRef.current) return;
+    if (reviewIdx === null) return;
+    const row = reviewItems[reviewIdx];
+    if (!row.trackingRowNum) { setReviewSeedEdit(null); return; }
+    seedSavingRef.current = true;
+    setIsSeedSaving(true);
+    try {
+      const res = await fetch('/api/admin/tracking', {
+        method: 'PUT',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ rowNum: row.trackingRowNum, [field]: value }),
+      });
+      if (!res.ok) throw new Error();
+      const patch: Partial<UserListEntry> = { [field]: value };
+      setItems(prev => prev.map(r =>
+        r.trackingRowNum === row.trackingRowNum ? { ...r, ...patch } : r
+      ));
+      setReviewSeedEdit(null);
+      showToast('Saved', true);
+    } catch { showToast('Save failed', false); }
+    finally { setIsSeedSaving(false); seedSavingRef.current = false; }
+  }
+
+  // Keyboard navigation for review modal
+  useEffect(() => {
+    if (reviewIdx === null) return;
+    function onKey(e: KeyboardEvent) {
+      // If a SEED tile is being edited, Escape cancels the edit only
+      if (reviewSeedEdit) {
+        if (e.key === 'Escape') { e.preventDefault(); setReviewSeedEdit(null); }
+        return; // block arrow/close navigation while editing
+      }
+      if (e.key === 'ArrowLeft')  { e.preventDefault(); reviewNavigate(-1); }
+      if (e.key === 'ArrowRight') { e.preventDefault(); reviewNavigate(1); }
+      if (e.key === 'Escape')     { e.preventDefault(); closeReview(); }
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewIdx, reviewItems.length, reviewSeedEdit]);
 
   // ── Inline cell editing ──────────────────────────────────────────────────────
   function startCellEdit(row: UserListEntry, field: string, currentValue: string) {
@@ -710,6 +804,295 @@ export default function UserList() {
         );
       })()}
 
+      {/* Review modal */}
+      {reviewIdx !== null && (() => {
+        const row = reviewItems[reviewIdx];
+        if (!row) return null;
+        const imgUrl = relativeImageUrl(row.imageUrl);
+        const currentStatus = row.submissionStatus ?? 'PENDING';
+
+        // Parse the stored validation JSON for display
+        let aiResult: Record<string, unknown> | null = null;
+        try { if (row.validationResult) aiResult = JSON.parse(row.validationResult as string); } catch { /* ignore */ }
+        const failedChecks: string[] = (aiResult?.failedChecks as string[] | undefined) ?? [];
+        const guidelines: string[] = (aiResult?.guidelines as string[] | undefined) ?? [];
+        const checklist = (aiResult?.checklist ?? {}) as Record<string, boolean>;
+        const checklistEntries = Object.entries(checklist);
+        const aiReason = (aiResult?.reason as string | undefined) ?? '';
+        const aiSuggestion = (aiResult?.suggestion as string | undefined) ?? '';
+        const hasPrev = reviewIdx > 0;
+        const hasNext = reviewIdx < reviewItems.length - 1;
+
+        return (
+          <div
+            className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-2"
+            onClick={closeReview}
+          >
+            {/* Prev arrow */}
+            <button
+              className={`absolute left-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full flex items-center justify-center text-xl shadow-lg transition
+                ${hasPrev ? 'bg-white/90 hover:bg-white text-gray-700 cursor-pointer' : 'bg-white/30 text-white/30 cursor-not-allowed'}`}
+              onClick={e => { e.stopPropagation(); if (hasPrev) reviewNavigate(-1); }}
+              title="Previous (←)"
+              disabled={!hasPrev}
+            >‹</button>
+
+            {/* Next arrow */}
+            <button
+              className={`absolute right-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full flex items-center justify-center text-xl shadow-lg transition
+                ${hasNext ? 'bg-white/90 hover:bg-white text-gray-700 cursor-pointer' : 'bg-white/30 text-white/30 cursor-not-allowed'}`}
+              onClick={e => { e.stopPropagation(); if (hasNext) reviewNavigate(1); }}
+              title="Next (→)"
+              disabled={!hasNext}
+            >›</button>
+
+            {/* Modal card */}
+            <div
+              className="bg-white rounded-xl shadow-2xl flex flex-col w-full max-w-6xl mx-12"
+              style={{ height: '92vh' }}
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 shrink-0">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="font-semibold text-gray-900 truncate text-sm">
+                    {row.name}{row.email ? ` — ${row.email}` : ''}
+                  </span>
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-semibold shrink-0 ${
+                    currentStatus === 'APPROVED' ? 'bg-green-100 text-green-800' :
+                    currentStatus === 'REJECTED' ? 'bg-red-100 text-red-700' :
+                    'bg-yellow-100 text-yellow-800'
+                  }`}>{currentStatus}</span>
+                  <span className="text-xs text-gray-400 shrink-0">{reviewIdx + 1} / {reviewItems.length}</span>
+                </div>
+                <div className="flex items-center gap-2 ml-4 shrink-0">
+                  {imgUrl && (
+                    <a href={imgUrl} target="_blank" rel="noopener noreferrer" className="btn-icon text-primary-600 text-xs" title="Open image in new tab">↗</a>
+                  )}
+                  <button onClick={closeReview} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">×</button>
+                </div>
+              </div>
+
+              {/* Body — two columns */}
+              <div className="flex flex-1 min-h-0 overflow-hidden">
+
+                {/* Left pane — submission details */}
+                <div className="w-80 shrink-0 flex flex-col border-r border-gray-100 overflow-y-auto p-4 gap-4 text-xs">
+
+                  {/* Person info */}
+                  <section>
+                    <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Member</h3>
+                    <dl className="space-y-1">
+                      {[
+                        ['Project',  row.project],
+                        ['Name',     row.name],
+                        ['Account',  row.trackingAccount ?? row.account],
+                        ['Email',    row.email],
+                        ['Serial',   row.serial ?? row.deviceSerial],
+                        ['Device',   row.deviceName],
+                      ].map(([label, val]) => val ? (
+                        <div key={label} className="flex gap-1">
+                          <dt className="text-gray-400 shrink-0 w-14">{label}</dt>
+                          <dd className="text-gray-700 font-medium truncate">{val}</dd>
+                        </div>
+                      ) : null)}
+                    </dl>
+                  </section>
+
+                  {/* Submission meta */}
+                  <section>
+                    <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Submission</h3>
+                    <dl className="space-y-1">
+                      {[
+                        ['Type',       row.submissionType ?? row.deviceType],
+                        ['Date',       row.submissionDate ? formatDate(row.submissionDate) : null],
+                        ['Confidence', row.confidenceScore != null ? `${row.confidenceScore}%` : null],
+                      ].map(([label, val]) => val ? (
+                        <div key={label} className="flex gap-1">
+                          <dt className="text-gray-400 shrink-0 w-20">{label}</dt>
+                          <dd className="text-gray-700 font-medium">{val}</dd>
+                        </div>
+                      ) : null)}
+                    </dl>
+                  </section>
+
+                  {/* SEED dashboard tiles — click to edit */}
+                  <section>
+                    <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">SEED Dashboard</h3>
+                    <div className="grid grid-cols-2 gap-2">
+                      {([
+                        { field: 'malwareAlerts',   label: 'Malware Alerts',    value: row.malwareAlerts },
+                        { field: 'complianceChecks', label: 'Compliance Checks', value: row.complianceChecks },
+                        { field: 'seedConfiguration',label: 'SEED Configuration',value: row.seedConfiguration },
+                        { field: 'operatingSystem',  label: 'Operating System',  value: row.operatingSystem },
+                      ] as { field: string; label: string; value: string | undefined }[]).map(({ field, label, value }) => {
+                        const isEditing = reviewSeedEdit?.field === field;
+                        const display  = numOnly(value);
+                        const num = display !== null ? parseInt(display, 10) : NaN;
+                        const isZero   = !isNaN(num) && num === 0;
+                        const hasIssue = !isNaN(num) && num > 0;
+                        const canEdit  = !!row.trackingRowNum;
+                        return (
+                          <div
+                            key={field}
+                            className={`relative rounded-lg border flex flex-col overflow-hidden
+                              ${hasIssue ? 'border-amber-200 bg-amber-50' : isZero ? 'border-teal-200 bg-teal-50/60' : 'border-gray-200 bg-gray-50'}
+                              ${canEdit && !isEditing ? 'cursor-pointer group' : ''}`}
+                            onClick={() => canEdit && !isEditing && setReviewSeedEdit({ field, value: display ?? '' })}
+                          >
+                            <div className="px-3 pt-2.5 pb-1">
+                              <p className="text-gray-500 text-[10px] font-medium leading-tight mb-1">{label}</p>
+                              {isEditing ? (
+                                <div className="flex flex-col gap-1 py-1" onClick={e => e.stopPropagation()}>
+                                  <input
+                                    className="form-input text-sm py-1 px-2 w-full"
+                                    value={reviewSeedEdit.value}
+                                    autoFocus
+                                    onChange={e => setReviewSeedEdit(prev => prev ? { ...prev, value: e.target.value } : null)}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') { e.preventDefault(); saveSeedField(field, reviewSeedEdit.value); }
+                                      if (e.key === 'Escape') { e.preventDefault(); setReviewSeedEdit(null); }
+                                    }}
+                                    onBlur={() => { if (!seedSavingRef.current) saveSeedField(field, reviewSeedEdit?.value ?? ''); }}
+                                  />
+                                  {isSeedSaving && <span className="spinner w-3 h-3 border-gray-400 border-t-transparent self-center" />}
+                                </div>
+                              ) : (
+                                <p className={`text-2xl font-bold leading-none py-1
+                                  ${hasIssue ? 'text-amber-600' : isZero ? 'text-teal-600' : 'text-gray-400'}`}>
+                                  {display ?? '—'}
+                                </p>
+                              )}
+                            </div>
+                            {/* Colored bottom bar */}
+                            <div className={`h-1 mt-auto
+                              ${hasIssue ? 'bg-amber-400' : isZero ? 'bg-teal-400' : 'bg-gray-300'}`} />
+                            {/* Edit pencil hint */}
+                            {canEdit && !isEditing && (
+                              <span className="absolute top-1.5 right-1.5 text-gray-300 group-hover:text-gray-500 text-[10px]">✎</span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {!row.trackingRowNum && (
+                      <p className="mt-1 text-gray-400 italic">No tracking row — values read-only</p>
+                    )}
+                  </section>
+
+                  {/* AI reason */}
+                  {aiReason && (
+                    <section>
+                      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">AI Reason</h3>
+                      <p className="text-gray-600 leading-relaxed">{aiReason}</p>
+                    </section>
+                  )}
+
+                  {/* Checklist */}
+                  {checklistEntries.length > 0 && (
+                    <section>
+                      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Checklist</h3>
+                      <ul className="space-y-1">
+                        {checklistEntries.map(([key, passed]) => (
+                          <li key={key} className="flex items-center gap-1.5">
+                            <span className={passed ? 'text-green-500' : 'text-red-500'}>{passed ? '✓' : '✗'}</span>
+                            <span className={passed ? 'text-gray-600' : 'text-red-600'}>{key}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
+
+                  {/* Failed checks */}
+                  {failedChecks.length > 0 && (
+                    <section>
+                      <h3 className="text-xs font-semibold text-red-500 uppercase tracking-wide mb-2">Failed Checks</h3>
+                      <ul className="space-y-1">
+                        {failedChecks.map((c, i) => (
+                          <li key={i} className="flex items-start gap-1.5 text-red-600">
+                            <span className="shrink-0 mt-0.5">•</span><span>{c}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
+
+                  {/* Guidelines */}
+                  {guidelines.length > 0 && (
+                    <section>
+                      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Guidelines</h3>
+                      <ul className="space-y-1">
+                        {guidelines.map((g, i) => (
+                          <li key={i} className="flex items-start gap-1.5 text-gray-600">
+                            <span className="shrink-0 mt-0.5">→</span><span>{g}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
+
+                  {/* Suggestion */}
+                  {aiSuggestion && (
+                    <section>
+                      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Suggestion</h3>
+                      <p className="text-gray-600 italic leading-relaxed">{aiSuggestion}</p>
+                    </section>
+                  )}
+                </div>
+
+                {/* Right pane — image */}
+                <div className="flex-1 min-w-0 bg-gray-50 flex flex-col overflow-hidden">
+                  {imgUrl ? (
+                    <iframe
+                      src={imgUrl}
+                      title="Submission image"
+                      style={{ width: '100%', height: '100%', border: 'none' }}
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center text-gray-400 gap-3 h-full">
+                      <span className="text-5xl">🖼️</span>
+                      <span className="text-sm">No image submitted</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Footer — action buttons */}
+              <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100 shrink-0 bg-gray-50 rounded-b-xl">
+                <div className="flex items-center gap-2 text-xs text-gray-400">
+                  <span>← → navigate</span>
+                  <span>·</span>
+                  <span>Esc close</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    disabled={isReviewSaving || currentStatus === 'PENDING'}
+                    onClick={() => reviewChangeStatus('PENDING')}
+                    className="px-3 py-1.5 rounded text-xs font-semibold border border-yellow-300 bg-yellow-50 text-yellow-700 hover:bg-yellow-100 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                  >
+                    {isReviewSaving ? <span className="spinner w-3 h-3 border-yellow-400 border-t-transparent inline-block" /> : '⏸ Pending'}
+                  </button>
+                  <button
+                    disabled={isReviewSaving || currentStatus === 'REJECTED'}
+                    onClick={() => reviewChangeStatus('REJECTED')}
+                    className="px-3 py-1.5 rounded text-xs font-semibold border border-red-300 bg-red-50 text-red-700 hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                  >
+                    {isReviewSaving ? <span className="spinner w-3 h-3 border-red-400 border-t-transparent inline-block" /> : '✕ Reject'}
+                  </button>
+                  <button
+                    disabled={isReviewSaving || currentStatus === 'APPROVED'}
+                    onClick={() => reviewChangeStatus('APPROVED')}
+                    className="px-4 py-1.5 rounded text-xs font-semibold bg-green-600 text-white hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                  >
+                    {isReviewSaving ? <span className="spinner w-3 h-3 border-white border-t-transparent inline-block" /> : '✓ Approve'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Summary chips */}
       <div className="flex flex-wrap gap-2 mb-4">
         <span className="px-3 py-1 rounded-full bg-gray-100 text-gray-700 text-sm font-medium">Showing: {totalCount}</span>
@@ -840,6 +1223,14 @@ export default function UserList() {
           </button>
         )}
         <div className="flex-1" />
+        <button
+          onClick={() => { if (reviewItems.length > 0) setReviewIdx(0); }}
+          disabled={reviewItems.length === 0}
+          className="btn-secondary flex items-center gap-1.5 text-sm"
+          title={reviewItems.length > 0 ? `Review ${reviewItems.length} submission(s)` : 'No submissions to review'}
+        >
+          🔍 Review {reviewItems.length > 0 ? `(${reviewItems.length})` : ''}
+        </button>
         <button onClick={loadData} disabled={isLoading} className="btn-secondary" title="Refresh">
           {isLoading ? <span className="spinner w-4 h-4 border-gray-400 border-t-transparent"></span> : '🔄'}
         </button>
@@ -949,16 +1340,16 @@ export default function UserList() {
                 )}
 
                 {/* Malware Alerts */}
-                {renderCell(row, 'malwareAlerts', row.malwareAlerts ?? '')}
+                {renderCell(row, 'malwareAlerts', numOnly(row.malwareAlerts) ?? '')}
 
                 {/* Compliance Checks */}
-                {renderCell(row, 'complianceChecks', row.complianceChecks ?? '')}
+                {renderCell(row, 'complianceChecks', numOnly(row.complianceChecks) ?? '')}
 
                 {/* SEED Config */}
-                {renderCell(row, 'seedConfiguration', row.seedConfiguration ?? '')}
+                {renderCell(row, 'seedConfiguration', numOnly(row.seedConfiguration) ?? '')}
 
                 {/* OS */}
-                {renderCell(row, 'operatingSystem', row.operatingSystem ?? '')}
+                {renderCell(row, 'operatingSystem', numOnly(row.operatingSystem) ?? '')}
 
                 {/* Submitted — read-only */}
                 <td className="text-gray-400 whitespace-nowrap truncate">
@@ -987,7 +1378,7 @@ export default function UserList() {
                   })()}
                 </td>
 
-                {/* Actions — only delete buttons remain */}
+                {/* Actions */}
                 <td>
                   <div className="flex gap-1">
                     {row.trackingRowNum && (
