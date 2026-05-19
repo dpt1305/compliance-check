@@ -1041,12 +1041,12 @@ export default function UserList() {
                 </div>
 
                 {/* Right pane — image */}
-                <div className="flex-1 min-w-0 bg-gray-50 flex flex-col overflow-hidden">
+                <div className="flex-1 min-w-0 bg-gray-900 flex items-center justify-center overflow-hidden">
                   {imgUrl ? (
-                    <iframe
+                    <img
                       src={imgUrl}
-                      title="Submission image"
-                      style={{ width: '100%', height: '100%', border: 'none' }}
+                      alt="Submission"
+                      style={{ width: '100%', height: '100%', objectFit: 'contain' }}
                     />
                   ) : (
                     <div className="flex flex-col items-center justify-center text-gray-400 gap-3 h-full">
