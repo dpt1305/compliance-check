@@ -16,10 +16,9 @@ const WINDOWS_CHECKLIST: GuidanceItem[] = [
 ];
 
 const MAC_CHECKLIST: GuidanceItem[] = [
-  { title: 'SEED Dashboard (Preferred)', description: 'Dashboard showing full device name, serial number, and 4+ metrics/counters', icon: '📊', required: false },
-  { title: 'Top-Right Timestamp', description: 'System timestamp visible in top-right corner of screen', icon: '🕐', required: false },
-  { title: 'Mac System Info', description: 'Alternative: System Preferences > About This Mac showing model name and serial', icon: 'ℹ️', required: false },
-  { title: 'Trellix Status (Fallback)', description: 'If no SEED dashboard: Trellix endpoint security showing "trellix status: ok"', icon: '🛡️', required: false },
+  { title: 'SEED Dashboard', description: 'SEED dashboard visible showing device name, serial number, and 4+ metric counters (Malware Alerts, Compliance Checks, SEED Configuration, Operating System)', icon: '📊', required: true },
+  { title: 'Timestamp', description: 'A readable date or time visible anywhere in the image (menu bar, page footer, browser, system clock, etc.)', icon: '🕐', required: true },
+  { title: 'Mac System Info', description: 'System Preferences / System Settings > About This Mac showing model name and serial number', icon: 'ℹ️', required: true },
 ];
 
 const THIN_CHECKLIST: GuidanceItem[] = [
@@ -49,7 +48,9 @@ export default function ValidationGuidance({ submissionType }: Props) {
   const guidanceText =
     type === 'windows'
       ? 'All 5 items above must be visible in your screenshot for approval. SEED dashboard is required.'
-      : type === 'thin'
+      : type === 'mac'
+        ? 'All 3 items above must be visible in your screenshot for approval.'
+        : type === 'thin'
         ? 'All 8 items above must be present in your screenshot(s) for approval. You may capture multiple screens.'
         : 'Provide either: (1) SEED dashboard + timestamp, OR (2) System info + timestamp, OR (3) Trellix status showing "ok"';
 
@@ -98,10 +99,10 @@ export default function ValidationGuidance({ submissionType }: Props) {
           )}
           {type === 'mac' && (
             <>
-              <li>SEED dashboard is preferred but not required if you can show alternative paths</li>
-              <li>System Preferences &gt; About This Mac shows device name and serial</li>
-              <li>You need timestamps to verify device information currency</li>
-              <li>Trellix status from System Preferences or security app is acceptable</li>
+              <li><strong>SEED dashboard is required</strong> — open the SEED app and capture the dashboard showing all 4 metric counters</li>
+              <li>Open <strong>System Settings → General → About</strong> (macOS Ventura+) or <strong>Apple menu → About This Mac</strong> to show model name and serial number</li>
+              <li>Any visible timestamp anywhere in the image is acceptable (menu bar clock, browser tab, page footer, etc.)</li>
+              <li>Make sure device name and serial are <strong>fully visible</strong> (not truncated)</li>
             </>
           )}
           {type === 'thin' && (
