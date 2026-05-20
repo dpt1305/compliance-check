@@ -219,14 +219,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       submission.hasDeviceSerial = !failedChecks.some(c => c.toLowerCase().includes('serial'));
     } else if (submissionType.toLowerCase() === 'thin') {
       const cl = aiResult.checklist ?? {};
-      submission.hasThinVirusThreatProtection   = cl['hasVirusThreatProtection']     ?? !failedChecks.some(c => c.toLowerCase().includes('virus'));
-      submission.hasThinAccountProtection       = cl['hasAccountProtection']         ?? !failedChecks.some(c => c.toLowerCase().includes('account protection'));
-      submission.hasThinFirewallNetworkProtection = cl['hasFirewallNetworkProtection'] ?? !failedChecks.some(c => c.toLowerCase().includes('firewall'));
-      submission.hasThinAppBrowserControl       = cl['hasAppBrowserControl']         ?? !failedChecks.some(c => c.toLowerCase().includes('app') && c.toLowerCase().includes('browser'));
-      submission.hasThinDeviceSecurity          = cl['hasDeviceSecurity']            ?? !failedChecks.some(c => c.toLowerCase().includes('device security'));
-      submission.hasThinDevicePerformanceHealth = cl['hasDevicePerformanceHealth']   ?? !failedChecks.some(c => c.toLowerCase().includes('performance') || c.toLowerCase().includes('health'));
+      // ── SECURITY AT A GLANCE checks (commented out — replaced by full scan check) ──
+      // submission.hasThinVirusThreatProtection   = cl['hasVirusThreatProtection']     ?? !failedChecks.some(c => c.toLowerCase().includes('virus'));
+      // submission.hasThinAccountProtection       = cl['hasAccountProtection']         ?? !failedChecks.some(c => c.toLowerCase().includes('account protection'));
+      // submission.hasThinFirewallNetworkProtection = cl['hasFirewallNetworkProtection'] ?? !failedChecks.some(c => c.toLowerCase().includes('firewall'));
+      // submission.hasThinAppBrowserControl       = cl['hasAppBrowserControl']         ?? !failedChecks.some(c => c.toLowerCase().includes('app') && c.toLowerCase().includes('browser'));
+      // submission.hasThinDeviceSecurity          = cl['hasDeviceSecurity']            ?? !failedChecks.some(c => c.toLowerCase().includes('device security'));
+      // submission.hasThinDevicePerformanceHealth = cl['hasDevicePerformanceHealth']   ?? !failedChecks.some(c => c.toLowerCase().includes('performance') || c.toLowerCase().includes('health'));
+      // ── Active checks ────────────────────────────────────────────────────────────────
       submission.hasThinWindowsUpdate           = cl['hasWindowsUpdate']             ?? !failedChecks.some(c => c.toLowerCase().includes('update'));
       submission.hasThinSerialNumber            = cl['hasSerialNumber']              ?? !failedChecks.some(c => c.toLowerCase().includes('serial'));
+      // hasThinVirusThreatProtection reused to store full-scan result
+      submission.hasThinVirusThreatProtection   = cl['hasFullScan']                  ?? !failedChecks.some(c => c.toLowerCase().includes('full scan') || c.toLowerCase().includes('scan'));
       if (aiResult.deviceSerial) submission.deviceSerial = aiResult.deviceSerial;
     } else if (submissionType.toLowerCase() === 'mac') {
       submission.hasSeedDashboard = !failedChecks.some(c => c.toLowerCase().includes('seed'));

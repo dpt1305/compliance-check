@@ -205,6 +205,11 @@ Fill in the required values:
 | `JWT_SECRET` | Output of `openssl rand -hex 32` |
 | `GEMINI_API_KEY` | Your AI API key |
 | `CHATGPT_API_KEY` | Your AI API key |
+| `MONGODB_URI` | *(Optional)* MongoDB connection string — if set, app uses MongoDB instead of SQLite |
+| `MONGODB_DB_NAME` | *(Optional)* MongoDB database name, e.g. `compliance` (defaults to `compliance`) |
+
+> **MongoDB** is opt-in. Leave `MONGODB_URI` unset to keep SQLite as the storage backend.  
+> When `MONGODB_URI` is first set and the app starts, it **auto-migrates** all existing SQLite data to MongoDB — no manual steps required.
 
 > **AWS credentials — do not add them.**  
 > `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are intentionally absent from `.env.production`.  
@@ -348,7 +353,6 @@ server {
 > If you want **both** `www` and the subdomain to work, list them space-separated:  
 > `server_name compliance.your-domain.com www.compliance.your-domain.com;`  
 > (and add a matching CNAME `www.compliance → compliance.your-domain.com` in DNS)
-
 ---
 
 ```bash
@@ -528,13 +532,14 @@ If this fails, the IAM role isn't attached correctly (Step 6).
 
 ## Data Location on EC2
 
-| Data | Path |
+| Data | Path / Location |
 |---|---|
-| Submissions JSON | `/home/ubuntu/compliance-app/compliance-nextjs/data/submissions.json` |
+| Submissions JSON | `/home/ubuntu/compliance-app/compliance-nextjs/data/submissions.json` *(SQLite mode)* |
 | Admin credentials | `/home/ubuntu/compliance-app/compliance-nextjs/data/admins.json` |
 | Tracking Excel | `/home/ubuntu/compliance-app/compliance-nextjs/data/tracking.xlsx` |
 | Images | S3 bucket `my-compliance-images/images/` |
 | PM2 logs | `~/.pm2/logs/` |
+| MongoDB data | Managed by your MongoDB host (Atlas, self-hosted, etc.) when `MONGODB_URI` is set |
 
 Back up the `data/` directory regularly:
 ```bash

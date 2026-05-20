@@ -22,12 +22,15 @@ const MAC_CHECKLIST: GuidanceItem[] = [
 ];
 
 const THIN_CHECKLIST: GuidanceItem[] = [
-  { title: 'Virus & threat protection', description: 'Windows Security → "Virus & threat protection" showing a green tick (No current threats)', icon: '🛡️', required: true },
-  { title: 'Account protection', description: 'Windows Security → "Account protection" showing a green tick', icon: '👤', required: true },
-  { title: 'Firewall & network protection', description: 'Windows Security → "Firewall & network protection" showing a green tick', icon: '🔥', required: true },
-  { title: 'App & browser control', description: 'Windows Security → "App & browser control" showing a green tick', icon: '🌐', required: true },
-  { title: 'Device security', description: 'Windows Security → "Device security" showing a green tick', icon: '💻', required: true },
-  { title: 'Device performance & health', description: 'Windows Security → "Device performance & health" showing "No action needed"', icon: '❤️', required: true },
+  // ── Security at a glance (commented out — replaced by full scan check) ─────────────────
+  // { title: 'Virus & threat protection', description: 'Windows Security → "Virus & threat protection" showing a green tick (No current threats)', icon: '🛡️', required: true },
+  // { title: 'Account protection', description: 'Windows Security → "Account protection" showing a green tick', icon: '👤', required: true },
+  // { title: 'Firewall & network protection', description: 'Windows Security → "Firewall & network protection" showing a green tick', icon: '🔥', required: true },
+  // { title: 'App & browser control', description: 'Windows Security → "App & browser control" showing a green tick', icon: '🌐', required: true },
+  // { title: 'Device security', description: 'Windows Security → "Device security" showing a green tick', icon: '💻', required: true },
+  // { title: 'Device performance & health', description: 'Windows Security → "Device performance & health" showing "No action needed"', icon: '❤️', required: true },
+  // ── Active requirements ───────────────────────────────────────────────────────────────
+  { title: 'Windows Security — Full Scan Result', description: 'Windows Security → Virus & threat protection → Scan options: must show a completed Full scan with "No current threats", "0 threats found", last scan date/time, and number of files scanned', icon: '🛡️', required: true },
   { title: 'Windows Update', description: 'Windows Update screen showing "Up to date"', icon: '🔄', required: true },
   { title: 'Serial Number in Terminal', description: 'Terminal / command prompt (PowerShell, CMD) showing the device serial number — e.g. via Get-CimInstance Win32_BIOS or wmic bios get serialnumber', icon: '#️⃣', required: true },
 ];
@@ -51,7 +54,7 @@ export default function ValidationGuidance({ submissionType }: Props) {
       : type === 'mac'
         ? 'All 3 items above must be visible in your screenshot for approval.'
         : type === 'thin'
-        ? 'All 8 items above must be present in your screenshot(s) for approval. You may capture multiple screens.'
+        ? 'All 3 items above must be present in your screenshot(s) for approval. You may combine all screens in one capture.'
         : 'Provide either: (1) SEED dashboard + timestamp, OR (2) System info + timestamp, OR (3) Trellix status showing "ok"';
 
   return (
@@ -107,10 +110,10 @@ export default function ValidationGuidance({ submissionType }: Props) {
           )}
           {type === 'thin' && (
             <>
-              <li>Open <strong>Windows Security</strong> (Start → Windows Security) and capture the home screen showing all items</li>
-              <li>All six items must show a <strong>green tick</strong> or <strong>&quot;No action needed&quot;</strong></li>
+              <li>Open <strong>Windows Security</strong> → <strong>Virus &amp; threat protection</strong> → click <strong>&quot;Scan options&quot;</strong> — capture the page showing the last Full scan result, date, 0 threats, and files scanned count</li>
+              <li>Do <strong>NOT</strong> capture the Windows Security home screen (the six-tile overview) — the <strong>Scan options / scan results page</strong> is required</li>
               <li>Open <strong>Windows Update</strong> (Settings → Windows Update) and capture the &quot;Up to date&quot; screen</li>
-              <li>Open <strong>PowerShell</strong> or <strong>Command Prompt</strong> and run: <code>Get-CimInstance Win32_BIOS | Select-Object SerialNumber</code> or <code>wmic bios get serialnumber</code> — capture the output showing your serial number</li>
+              <li>Open <strong>PowerShell</strong> or <strong>Command Prompt</strong> and run: <code>powershell -Command &quot;(Get-CimInstance Win32_BIOS).SerialNumber&quot;</code> — capture the output showing your serial number</li>
               <li>You may combine all elements into one screenshot or submit separate captures</li>
             </>
           )}

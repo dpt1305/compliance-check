@@ -2,8 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findAll, deleteByPeriod } from '@/lib/db/submission-repo';
 import { deleteImage } from '@/lib/utils/file-storage';
 
-export async function GET(): Promise<NextResponse> {
+export async function GET(req: NextRequest): Promise<NextResponse> {
   const submissions = await findAll();
+
+  // Lightweight poll probe — just return total count + latest timestamp
+  if (req.nextUrl.searchParams.has('_poll')) {
+    const latest = submissions.reduce((max, s) =>
+      s.submissionDate > max ? s.submissionDate : max, '');
+    return NextResponse.json({ total: submissions.length, ts: latest || Date.now() });
+  }
+
   return NextResponse.json(
     submissions.map(s => ({
       id: s.id,
