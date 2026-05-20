@@ -3,8 +3,8 @@ import { findAll } from '@/lib/db/submission-repo';
 import { readActive as readTrackingRows } from '@/lib/db/tracking-repo';
 
 export async function GET(): Promise<NextResponse> {
-  const submissions  = findAll();
-  const trackingRows = readTrackingRows();
+  const submissions  = await findAll();
+  const trackingRows = await readTrackingRows();
 
   // Build a map from account → project using tracking data
   const accountToProject = new Map<string, string>();

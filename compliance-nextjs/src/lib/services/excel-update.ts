@@ -88,7 +88,7 @@ export async function updateTrackingExcel(
   console.info(`[excel-update] Attempting DB update — serial="${deviceSerial}" name="${deviceName}" account="${account}"`);
 
   try {
-    const rows = readAll();
+    const rows = await readAll();
     const match = rows.find(r => matchesDevice(deviceSerial, deviceName, account, r));
 
     if (!match) {
@@ -97,7 +97,7 @@ export async function updateTrackingExcel(
     }
 
     const [malwareAlerts, complianceChecks, seedConfiguration, operatingSystem] = buildSeedValues(aiResult);
-    updateSeedFields(match.id, { malwareAlerts, complianceChecks, seedConfiguration, operatingSystem });
+    await updateSeedFields(match.id, { malwareAlerts, complianceChecks, seedConfiguration, operatingSystem });
 
     console.info(`[excel-update] Updated DB row id=${match.id} — values=[${malwareAlerts}, ${complianceChecks}, ${seedConfiguration}, ${operatingSystem}]`);
   } catch (err) {

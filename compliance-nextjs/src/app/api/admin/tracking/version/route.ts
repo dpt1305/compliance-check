@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getTrackingVersion } from '@/lib/db/index';
+import { getTrackingVersionAsync } from '@/lib/db/index';
 
 /**
  * GET /api/admin/tracking/version
@@ -7,5 +7,5 @@ import { getTrackingVersion } from '@/lib/db/index';
  * Used by the admin UI to poll for changes and silently refresh the user list.
  */
 export async function GET(): Promise<NextResponse> {
-  return NextResponse.json({ mtime: getTrackingVersion() });
+  return NextResponse.json({ mtime: await getTrackingVersionAsync() });
 }

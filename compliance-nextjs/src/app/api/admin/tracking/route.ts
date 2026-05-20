@@ -10,7 +10,7 @@ import type { Submission } from '@/lib/storage/json-storage';
 import { readAll as readTrackingDB, readActive as readActiveTrackingDB, replaceAll, mergeFromUpload, updateSeedFields } from '@/lib/db/tracking-repo';
 import type { TrackingMember } from '@/lib/db/tracking-repo';
 import { matchesTrackingRow } from '@/lib/db/tracking-repo';
-import { bumpTrackingVersion } from '@/lib/db/index';
+import { bumpTrackingVersionAsync as bumpTrackingVersion } from '@/lib/db/index';
 import { getImageBuffer } from '@/lib/utils/file-storage';
 
 const MONTH_NAMES = [
@@ -105,7 +105,7 @@ function sanitizeName(name: string): string {
  *   - Filtered ZIP exports are handled exclusively by POST
  */
 export async function GET(_req: NextRequest): Promise<NextResponse> {
-  const rows = readActiveTrackingDB();
+  const rows = await readActiveTrackingDB();
   if (rows.length === 0) {
     // Fall back to disk file if DB is empty (migration hasn't run yet)
     const diskPath = trackingFilePath();
@@ -124,7 +124,7 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
   }
 
   // Build tracking-row-id → best submission status map
-  const allSubmissions = findAll();
+  const allSubmissions = await findAll();
   const rowIdToStatus = buildRowStatusMap(rows, allSubmissions);
 
   // Generate fresh xlsx from DB rows
@@ -188,7 +188,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
       // Parse and import into DB using smart merge (preserves seed fields, keeps removed members)
       const parsed = await readTrackingRows(dest);
-      const { inserted, updated, preserved } = mergeFromUpload(parsed.map(r => ({
+      const { inserted, updated, preserved } = await mergeFromUpload(parsed.map(r => ({
         no:                 r.no ?? undefined,
         project:            r.project || undefined,
         name:               r.name,
@@ -204,7 +204,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         responseFromTicket: r.responseFromTicket || undefined,
         trackingStatus:     r.trackingStatus || undefined,
       })));
-      bumpTrackingVersion();
+      await bumpTrackingVersion();
 
       return NextResponse.json({
         message: 'Tracking file updated successfully',
@@ -229,7 +229,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ message: 'No members provided' }, { status: 400 });
     }
 
-    const allSubmissions = findAll();
+    const allSubmissions = await findAll();
     const submissionById = new Map(allSubmissions.map(s => [s.id, s]));
 
     const hasDate = month !== undefined && year !== undefined &&
@@ -241,7 +241,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // Build filtered tracking xlsx from DB rows
     {
-      const allDbRows = readActiveTrackingDB();
+      const allDbRows = await readActiveTrackingDB();
       const memberIdSet = new Set(members.filter(m => m.trackingRowNum).map(m => m.trackingRowNum as number));
       const idToMember = new Map(members.filter(m => m.trackingRowNum).map(m => [m.trackingRowNum as number, m]));
       const filteredDbRows = allDbRows.filter(r => memberIdSet.has(r.id));
@@ -333,7 +333,7 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
 
     if (!rowNum || rowNum < 1) return NextResponse.json({ message: 'Invalid rowNum' }, { status: 400 });
 
-    const ok = updateSeedFields(rowNum, {
+    const ok = await updateSeedFields(rowNum, {
       ...(malwareAlerts    !== undefined && { malwareAlerts }),
       ...(complianceChecks !== undefined && { complianceChecks }),
       ...(seedConfiguration!== undefined && { seedConfiguration }),

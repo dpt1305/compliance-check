@@ -148,3 +148,28 @@ export function getTrackingVersion(): number {
   const row = raw.prepare(`SELECT value FROM _meta WHERE key = 'tracking_version'`).get() as { value: string } | undefined;
   return parseInt(row?.value ?? '0', 10);
 }
+
+
+/**
+ * Async proxy: bump tracking version from the active backend (MongoDB or SQLite).
+ */
+export async function bumpTrackingVersionAsync(): Promise<number> {
+  const { isMongoEnabled } = await import('./mongo/connection');
+  if (isMongoEnabled()) {
+    const { bumpTrackingVersion: fn } = await import('./mongo/tracking-repo');
+    return fn();
+  }
+  return bumpTrackingVersion();
+}
+
+/**
+ * Async proxy: get tracking version from the active backend.
+ */
+export async function getTrackingVersionAsync(): Promise<number> {
+  const { isMongoEnabled } = await import('./mongo/connection');
+  if (isMongoEnabled()) {
+    const { getTrackingVersion: fn } = await import('./mongo/tracking-repo');
+    return fn();
+  }
+  return getTrackingVersion();
+}

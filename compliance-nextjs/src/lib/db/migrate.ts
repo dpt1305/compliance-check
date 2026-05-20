@@ -1,13 +1,17 @@
 /**
  * Auto-migration: on first startup, if DB tables are empty and legacy files
  * exist, seed the DB from them. Runs once; safe to call on every startup.
+ *
+ * When MONGODB_URI is set, delegates to the MongoDB migration runner.
+ * Otherwise, runs the SQLite migration as before.
  */
 import fs from 'fs';
 import path from 'path';
+import { isMongoEnabled } from './mongo/connection';
 import { db } from './index';
 import { trackingMembers, submissions, admins } from './schema';
-import { replaceAll as replaceTracking } from './tracking-repo';
-import { initDefaultAdmin } from './admin-repo';
+import { replaceAll as replaceTracking } from './sqlite/tracking-repo';
+import { initDefaultAdmin } from './sqlite/admin-repo';
 import type { Submission } from '@/lib/storage/json-storage';
 
 function legacyPath(envVar: string, def: string): string {
@@ -152,5 +156,14 @@ let migrated = false;
 export async function runMigrations(): Promise<void> {
   if (migrated) return;
   migrated = true;
+
+  if (isMongoEnabled()) {
+    // Delegate to the MongoDB migration runner (handles SQLite→Mongo + JSON files + default admin)
+    const { runMongoMigrations } = await import('./mongo/migrate');
+    await runMongoMigrations();
+    return;
+  }
+
+  // SQLite path — original behavior
   await Promise.all([migrateTracking(), migrateSubmissions(), migrateAdmins()]);
 }

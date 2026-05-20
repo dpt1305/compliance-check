@@ -14,8 +14,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const account = req.nextUrl.searchParams.get('account')?.trim();
   if (!account) return NextResponse.json({ message: 'account required' }, { status: 400 });
 
-  const trackingRows = readActive();
-  const submissions  = findAll();
+  const trackingRows = await readActive();
+  const submissions  = await findAll();
 
   // Parse device info from each submission
   const parsedSubs = submissions.map(s => {

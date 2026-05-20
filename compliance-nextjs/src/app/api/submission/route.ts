@@ -65,7 +65,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     // Read tracking rows once — reused for both the early account check and post-AI serial check
-    const trackingRows = readAllTracking();
+    const trackingRows = await readAllTracking();
 
     // Early account check — reject immediately if account not in tracking.xlsx (saves AI cost)
     if (trackingRows.length > 0 && !accountInTracking(trackingRows, account)) {
@@ -237,7 +237,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const saved = save(submission);
+    const saved = await save(submission);
 
     updateTrackingExcel(submissionType, aiResult, account).catch(err =>
       console.error('[submission] excel-update failed:', (err as Error).message)

@@ -1,8 +1,8 @@
-import { findAll } from '../storage/json-storage';
+import { findAll } from '../db/submission-repo';
 import ExcelJS from 'exceljs';
 
 export async function generateReport(): Promise<Buffer> {
-  const submissions = findAll();
+  const submissions = await findAll();
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('Compliance Submissions');
 
