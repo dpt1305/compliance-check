@@ -1,32 +1,17 @@
-import { db } from './index';
-import { attendance } from './schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { isMongoEnabled } from './mongo/connection';
 
-export type AttendanceStatus = 'ATTEND' | 'LATE' | 'ABSENT';
-export type AttendanceSession = 'AM' | 'PM';
+export type { AttendanceStatus, AttendanceSession, AttendanceRecord, InsertAttendanceInput } from './mongo/attendance-repo';
 
-export interface AttendanceRecord {
-  id: number;
-  date: string;
-  time: string;
-  session: AttendanceSession;
-  accountId: string;
-  status: AttendanceStatus;
-  remark: string | null;
-  createdAt: string;
+function sqlite() {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const s = require('./sqlite/attendance-repo') as typeof import('./sqlite/attendance-repo');
+  return s;
 }
 
-export interface InsertAttendanceInput {
-  date: string;
-  time: string;
-  session: AttendanceSession;
-  accountId: string;
-  status: AttendanceStatus;
-  remark?: string | null;
-}
+import type { AttendanceRecord, InsertAttendanceInput } from './mongo/attendance-repo';
 
-/** Normalise status — accepts "ABSEND" as a typo for "ABSENT". */
-export function normaliseStatus(raw: string): AttendanceStatus | null {
+/** Normalise status — accepts "ABSEND" as a typo for "ABSENT". Pure function, no DB. */
+export function normaliseStatus(raw: string): 'ATTEND' | 'LATE' | 'ABSENT' | null {
   const s = raw.trim().toUpperCase();
   if (s === 'ATTEND') return 'ATTEND';
   if (s === 'LATE')   return 'LATE';
@@ -34,52 +19,34 @@ export function normaliseStatus(raw: string): AttendanceStatus | null {
   return null;
 }
 
-/** Insert a new attendance record. Returns the created row. */
-export function insertAttendance(input: InsertAttendanceInput): AttendanceRecord {
-  const now = new Date().toISOString();
-  const result = db
-    .insert(attendance)
-    .values({
-      date:      input.date,
-      time:      input.time,
-      session:   input.session,
-      accountId: input.accountId,
-      status:    input.status,
-      remark:    input.remark ?? null,
-      createdAt: now,
-    })
-    .returning()
-    .get();
-  return result as unknown as AttendanceRecord;
+export async function insertAttendance(input: InsertAttendanceInput): Promise<AttendanceRecord> {
+  if (isMongoEnabled()) {
+    const { insertAttendance: fn } = await import('./mongo/attendance-repo');
+    return fn(input);
+  }
+  return sqlite().insertAttendance(input);
 }
 
-/** Get all attendance records for a specific date (ordered by time asc). */
-export function getAttendanceByDate(date: string): AttendanceRecord[] {
-  return db
-    .select()
-    .from(attendance)
-    .where(eq(attendance.date, date))
-    .orderBy(attendance.time)
-    .all() as unknown as AttendanceRecord[];
+export async function getAttendanceByDate(date: string): Promise<AttendanceRecord[]> {
+  if (isMongoEnabled()) {
+    const { getAttendanceByDate: fn } = await import('./mongo/attendance-repo');
+    return fn(date);
+  }
+  return sqlite().getAttendanceByDate(date);
 }
 
-/** Get attendance records for a specific account (most recent first). */
-export function getAttendanceByAccount(accountId: string, limit = 100): AttendanceRecord[] {
-  return db
-    .select()
-    .from(attendance)
-    .where(eq(attendance.accountId, accountId))
-    .orderBy(desc(attendance.createdAt))
-    .limit(limit)
-    .all() as unknown as AttendanceRecord[];
+export async function getAttendanceByAccount(accountId: string, limit = 100): Promise<AttendanceRecord[]> {
+  if (isMongoEnabled()) {
+    const { getAttendanceByAccount: fn } = await import('./mongo/attendance-repo');
+    return fn(accountId, limit);
+  }
+  return sqlite().getAttendanceByAccount(accountId, limit);
 }
 
-/** Get attendance records for a specific date and account. */
-export function getAttendanceByDateAndAccount(date: string, accountId: string): AttendanceRecord[] {
-  return db
-    .select()
-    .from(attendance)
-    .where(and(eq(attendance.date, date), eq(attendance.accountId, accountId)))
-    .orderBy(attendance.time)
-    .all() as unknown as AttendanceRecord[];
+export async function getAttendanceByDateAndAccount(date: string, accountId: string): Promise<AttendanceRecord[]> {
+  if (isMongoEnabled()) {
+    const { getAttendanceByDateAndAccount: fn } = await import('./mongo/attendance-repo');
+    return fn(date, accountId);
+  }
+  return sqlite().getAttendanceByDateAndAccount(date, accountId);
 }

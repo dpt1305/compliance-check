@@ -81,7 +81,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // ── Insert ────────────────────────────────────────────────────────────────
   try {
-    const record = insertAttendance({
+    const record = await insertAttendance({
       date:      date.trim(),
       time:      (time as string).trim(),
       session:   session as AttendanceSession,

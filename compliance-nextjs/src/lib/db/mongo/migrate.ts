@@ -73,7 +73,7 @@ async function migrateFromSQLite(): Promise<void> {
         updatedAt:          r.updated_at as string | null,
       }));
       await db.collection('tracking_members').insertMany(docs);
-      (await getCounters()).updateOne(
+      await (await getCounters()).updateOne(
         { _id: 'tracking_members' },
         { $set: { seq: Math.max(...docs.map(d => d.id)) } },
         { upsert: true },
@@ -126,7 +126,7 @@ async function migrateFromSQLite(): Promise<void> {
         deviceName:       r.device_name as string | null,
       }));
       await db.collection('submissions').insertMany(docs);
-      (await getCounters()).updateOne(
+      await (await getCounters()).updateOne(
         { _id: 'submissions' },
         { $set: { seq: Math.max(...docs.map(d => d.numericId)) } },
         { upsert: true },
@@ -135,6 +135,32 @@ async function migrateFromSQLite(): Promise<void> {
     }
   } else {
     console.log('[mongo-migrate] submissions: already populated, skipping');
+  }
+
+  // ── attendance ────────────────────────────────────────────────────────────
+  if (await colEmpty('attendance')) {
+    const rows = sqlite.prepare('SELECT * FROM attendance').all() as Record<string, unknown>[];
+    if (rows.length > 0) {
+      const docs = rows.map(r => ({
+        id:        r.id as number,
+        date:      r.date as string,
+        time:      r.time as string,
+        session:   r.session as string,
+        accountId: r.account_id as string,
+        status:    r.status as string,
+        remark:    r.remark as string | null,
+        createdAt: r.created_at as string,
+      }));
+      await db.collection('attendance').insertMany(docs);
+      await (await getCounters()).updateOne(
+        { _id: 'attendance' },
+        { $set: { seq: Math.max(...docs.map(d => d.id)) } },
+        { upsert: true },
+      );
+      console.log(`[mongo-migrate] attendance: migrated ${docs.length} rows`);
+    }
+  } else {
+    console.log('[mongo-migrate] attendance: already populated, skipping');
   }
 
   // ── admins ────────────────────────────────────────────────────────────────
@@ -177,7 +203,7 @@ async function migrateFromJsonFiles(): Promise<void> {
           });
           await db.collection('submissions').insertMany(docs);
           const maxId = Math.max(...docs.map(d => d.numericId));
-          (await getCounters()).updateOne(
+          await (await getCounters()).updateOne(
             { _id: 'submissions' },
             { $set: { seq: maxId } },
             { upsert: true },
@@ -225,7 +251,8 @@ export async function runMongoMigrations(): Promise<void> {
   const { ensureIndexes: ensureSubmission } = await import('./submission-repo');
   const { ensureIndexes: ensureAdmin }      = await import('./admin-repo');
   const { ensureIndexes: ensureTracking }   = await import('./tracking-repo');
-  await Promise.all([ensureSubmission(), ensureAdmin(), ensureTracking()]);
+  const { ensureIndexes: ensureAttendance } = await import('./attendance-repo');
+  await Promise.all([ensureSubmission(), ensureAdmin(), ensureTracking(), ensureAttendance()]);
 
   // Try SQLite first (newest data source), then fall back to JSON files
   await migrateFromSQLite();
@@ -241,8 +268,7 @@ export async function runMongoMigrations(): Promise<void> {
   }
 
   // Init tracking version counter if missing
-  const db = await getMongoDb();
-  (await getCounters()).updateOne(
+  await (await getCounters()).updateOne(
     { _id: 'tracking_version' },
     { $setOnInsert: { seq: 0 } },
     { upsert: true },
