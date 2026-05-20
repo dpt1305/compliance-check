@@ -4,6 +4,61 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.4.0] — 2026-05-20
+
+### Added
+
+#### MongoDB Repository Layer (opt-in, zero-downtime migration)
+- New provider factory: when `MONGODB_URI` is set, all data operations route to MongoDB; when unset, SQLite remains the default — no code change required
+- Created `src/lib/db/mongo/` with full implementations for all 4 repos: `submission-repo.ts`, `admin-repo.ts`, `tracking-repo.ts`, `attendance-repo.ts`
+- `_counters` collection provides auto-increment IDs for submissions, tracking members, attendance, and tracking version
+- Auto-migration on first startup (`mongo/migrate.ts`): copies all SQLite data → MongoDB, idempotent (skips if data already exists)
+- Proxy pattern: top-level `src/lib/db/*-repo.ts` files delegate to Mongo or SQLite depending on `isMongoEnabled()`
+- All API routes updated to `await` previously-synchronous repo calls
+- `attendance-repo.ts` (previously a direct SQLite import missed in initial pass) fully migrated through the same proxy pattern
+
+#### SSE Polling Fallback
+- `useAdminEvents.ts` now probes SSE for 3 seconds on connect; if the connection errors before the first message arrives, it automatically switches to **5-second polling**
+- Polling targets: `GET /api/admin/tracking/version` (returns `{ mtime }`) and `GET /api/admin/submissions?_poll=1` (returns `{ total, ts }`)
+- Ensures real-time-like updates work on serverless hosts (Vercel free plan) where SSE connections may be dropped between function invocations
+
+#### Image Upload Zone
+- File upload **button replaced with a full drop zone**: supports click-to-browse, drag & drop, and **Ctrl+V paste from clipboard**
+- **Thumbnail preview** shown inside the drop zone once a file is selected (full opacity when valid, dimmed when invalid)
+- **✕ clear button** (top-right corner of the zone) removes the selected file, resets validation state, and revokes the object URL to prevent memory leaks
+- Preview works for all three input methods (file picker, drag-drop, clipboard paste) via `useCallback`-stabilised `applyFile`
+
+### Changed
+
+#### Tag Filter Logic: AND → OR
+- Admin user list tag search changed from **AND** (row must match every tag) to **OR** (row must match any tag)
+- Affects `src/app/api/admin/user-list/route.ts` server-side filter
+
+#### Excel Export Column Updates (`tracking.xlsx`)
+- Column headers renamed to match the reporting spec:
+  `No. | Project | Name | Email | Serial | Account | Device Type | Malware Alerts | Compliance Checks | Seed Configuration | Operating System | Follow Up Action | Response From Ticket | Tracking Status`
+- `EVD / Ticket` column defaults to `"Refer photo captured in folder"` when `responseFromTicket` is empty
+- Empty `Note` column appended as the final column
+- Applies to both the full GET export and the filtered POST export
+
+#### Thin Client AI Validation — Replaced Security-at-a-Glance with Full Scan
+- Old 6 Windows Security home-screen checks (virus protection, account protection, firewall, app/browser, device security, device health) **commented out** in prompt and checklist — preserved in code for easy revert
+- New 3 required checks with **strict physical-visibility rules**:
+  1. **FULL_SCAN** — Scan Options page must be visible showing completed full scan, "No current threats", "0 threats found", scan date, and file count
+  2. **WINDOWS_UPDATE** — Windows Update page heading AND "You're up to date" text must both be physically visible; Windows Security page is explicitly NOT Windows Update
+  3. **SERIAL_NUMBER** — terminal window (PowerShell / CMD) must be visible with serial number output; line-wrapping is acceptable
+- `ValidationGuidance.tsx` checklist updated to show the 3 active items; old 6 items commented inline
+- `hasThinVirusThreatProtection` DB field reused to store `hasFullScan` result
+
+### Fixed
+
+- **Windows Update false positive**: added `HARD BLOCK` list to `THIN_PROMPT` explicitly naming "Windows Security / Scan Options page is NOT Windows Update" — prevents AI from inferring update status from a completed scan result
+- **Serial number wrapping**: AI no longer fails validation when serial number output wraps to the next terminal line
+- **Clipboard paste thumbnail**: `applyFile` converted to `useCallback` and declared as a dependency of the paste `useEffect`, eliminating the stale closure that caused the thumbnail to be skipped for pasted images
+- **`_id` field leaked in attendance API response**: `insertOne()` mutates the document with `_id`; fixed by destructuring `{ _id, ...clean }` before returning
+
+---
+
 ## [0.3.0] — 2026-05-19
 
 ### Added
