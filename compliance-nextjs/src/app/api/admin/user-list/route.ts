@@ -89,8 +89,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const month = monthParam ? parseInt(monthParam, 10) : null;
   const year  = yearParam  ? parseInt(yearParam,  10) : null;
   const hasPeriod = month !== null && year !== null && month >= 1 && month <= 12 && year > 0;
-  const trackingRows = readActive();
-  const submissions  = findAll();
+  const trackingRows = await readActive();
+  const submissions  = await findAll();
 
   // Parse AI identifiers from each submission's validationResult
   const parsedSubs = submissions.map(s => {
@@ -120,7 +120,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // so we can suppress unlinked-submission rows whose owner is already known to the system.
   function normStr(v: string | null | undefined) { return (v ?? '').trim().toLowerCase(); }
   const trackingIdentifiers = new Set<string>();
-  for (const row of readAll()) {          // readAll = active + removed
+  for (const row of await readAll()) {          // readAll = active + removed
     if (row.account) trackingIdentifiers.add(normStr(row.account));
     if (row.email)   trackingIdentifiers.add(normStr(row.email));
     if (row.serial)  trackingIdentifiers.add(normStr(row.serial));
@@ -248,7 +248,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const total = result.length;
   const items = result.slice(offset, offset + limit);
-  const projects = getDistinctProjects();
+  const projects = await getDistinctProjects();
   const summary = {
     approved:     result.filter(r => r.submissionStatus === 'APPROVED').length,
     submitted:    result.filter(r => r.submissionStatus && r.submissionStatus !== 'NOT_SUBMITTED').length,
@@ -299,7 +299,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ message: 'Email is invalid' }, { status: 400 });
     }
 
-    const inserted = insertMember({
+    const inserted = await insertMember({
       project:   trimValue(body.project) || null,
       name,
       email:     email || null,
@@ -340,7 +340,7 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ message: 'Email is invalid' }, { status: 400 });
     }
 
-    const updated = updateMember(id, {
+    const updated = await updateMember(id, {
       ...(body.project !== undefined   && { project: trimValue(body.project) || null }),
       ...(name !== undefined           && { name }),
       ...(email !== undefined          && { email: email || null }),
@@ -365,7 +365,7 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ message: 'Valid rowNum is required' }, { status: 400 });
     }
 
-    const ok = deleteMember(id);
+    const ok = await deleteMember(id);
     if (!ok) return NextResponse.json({ message: `Tracking row not found: ${id}` }, { status: 404 });
     return NextResponse.json({ message: 'Member deleted successfully', rowNum: id });
   } catch (err) {

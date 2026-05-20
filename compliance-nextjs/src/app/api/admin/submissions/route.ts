@@ -3,7 +3,7 @@ import { findAll, deleteByPeriod } from '@/lib/db/submission-repo';
 import { deleteImage } from '@/lib/utils/file-storage';
 
 export async function GET(): Promise<NextResponse> {
-  const submissions = findAll();
+  const submissions = await findAll();
   return NextResponse.json(
     submissions.map(s => ({
       id: s.id,
@@ -38,7 +38,7 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ message: 'Valid month (1-12) and year are required' }, { status: 400 });
   }
 
-  const deleted = deleteByPeriod(month, year);
+  const deleted = await deleteByPeriod(month, year);
 
   // Remove image files for each deleted submission
   let imagesDeleted = 0;

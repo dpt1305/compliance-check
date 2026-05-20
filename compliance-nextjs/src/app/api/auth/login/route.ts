@@ -15,7 +15,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ message: 'Username and password are required' }, { status: 400 });
     }
 
-    const admin = findByUsername(username);
+    const admin = await findByUsername(username);
     if (!admin || !admin.active) {
       return NextResponse.json({ message: 'Invalid username or password' }, { status: 401 });
     }

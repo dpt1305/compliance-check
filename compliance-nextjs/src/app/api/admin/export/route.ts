@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { generateReport } from '@/lib/services/excel-export';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(): Promise<NextResponse> {
   try {
     const buffer = await generateReport();

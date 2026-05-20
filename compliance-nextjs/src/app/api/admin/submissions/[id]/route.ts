@@ -6,7 +6,7 @@ type Params = { params: Promise<{ id: string }> };
 export async function GET(_req: NextRequest, { params }: Params): Promise<NextResponse> {
   const { id: idStr } = await params;
   const id = parseInt(idStr, 10);
-  const submission = findById(id);
+  const submission = await findById(id);
   if (!submission) return NextResponse.json({ message: `Submission not found: ${id}` }, { status: 404 });
   return NextResponse.json(submission);
 }
@@ -14,7 +14,7 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
 export async function PUT(req: NextRequest, { params }: Params): Promise<NextResponse> {
   const { id: idStr } = await params;
   const id = parseInt(idStr, 10);
-  const submission = findById(id);
+  const submission = await findById(id);
   if (!submission) return NextResponse.json({ message: `Submission not found: ${id}` }, { status: 404 });
 
   const body = await req.json() as { status?: string };
@@ -29,7 +29,7 @@ export async function PUT(req: NextRequest, { params }: Params): Promise<NextRes
   }
 
   submission.status = statusStr as 'PENDING' | 'APPROVED' | 'REJECTED';
-  const updated = save(submission);
+  const updated = await save(submission);
   return NextResponse.json({
     id: updated.id,
     account: updated.account,
@@ -45,9 +45,9 @@ export async function PUT(req: NextRequest, { params }: Params): Promise<NextRes
 export async function DELETE(_req: NextRequest, { params }: Params): Promise<NextResponse> {
   const { id: idStr } = await params;
   const id = parseInt(idStr, 10);
-  if (!existsById(id)) {
+  if (!await existsById(id)) {
     return NextResponse.json({ message: `Submission not found: ${id}` }, { status: 404 });
   }
-  deleteById(id);
+  await deleteById(id);
   return new NextResponse(null, { status: 204 });
 }

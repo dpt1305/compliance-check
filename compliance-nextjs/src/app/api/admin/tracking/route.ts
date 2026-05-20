@@ -10,8 +10,10 @@ import type { Submission } from '@/lib/storage/json-storage';
 import { readAll as readTrackingDB, readActive as readActiveTrackingDB, replaceAll, mergeFromUpload, updateSeedFields } from '@/lib/db/tracking-repo';
 import type { TrackingMember } from '@/lib/db/tracking-repo';
 import { matchesTrackingRow } from '@/lib/db/tracking-repo';
-import { bumpTrackingVersion } from '@/lib/db/index';
+import { bumpTrackingVersionAsync as bumpTrackingVersion } from '@/lib/db/index';
 import { getImageBuffer } from '@/lib/utils/file-storage';
+
+export const dynamic = 'force-dynamic';
 
 const MONTH_NAMES = [
   'January','February','March','April','May','June',
@@ -105,7 +107,7 @@ function sanitizeName(name: string): string {
  *   - Filtered ZIP exports are handled exclusively by POST
  */
 export async function GET(_req: NextRequest): Promise<NextResponse> {
-  const rows = readActiveTrackingDB();
+  const rows = await readActiveTrackingDB();
   if (rows.length === 0) {
     // Fall back to disk file if DB is empty (migration hasn't run yet)
     const diskPath = trackingFilePath();
@@ -124,7 +126,7 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
   }
 
   // Build tracking-row-id → best submission status map
-  const allSubmissions = findAll();
+  const allSubmissions = await findAll();
   const rowIdToStatus = buildRowStatusMap(rows, allSubmissions);
 
   // Generate fresh xlsx from DB rows
@@ -132,16 +134,18 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
   const sheet = wb.addWorksheet('Sheet1');
 
   // Header row
-  sheet.addRow(['No', 'Project', 'Name', 'Email', 'Serial', 'Account', 'Device Type',
-    'Malware Alerts', 'Compliance Checks', 'Seed Configuration', 'Operating System',
-    'Follow Up Action', 'Response From Ticket', 'Tracking Status']);
+  sheet.addRow(['No.', 'Project', 'Name', 'Account', 'Mail NCS', 'Serial Number', 'Type',
+    'Malware Alerts', 'Compliance Checks/Trellix', 'SEED Configuration', 'Operating System',
+    'Follow up action', 'EVD / Ticket', 'Status', 'Note']);
 
   for (const r of rows) {
     sheet.addRow([
-      r.no ?? '', r.project ?? '', r.name ?? '', r.email ?? '', r.serial ?? '',
-      r.account ?? '', r.deviceType ?? '', r.malwareAlerts ?? '', r.complianceChecks ?? '',
+      r.no ?? '', r.project ?? '', r.name ?? '', r.account ?? '', r.email ?? '', r.serial ?? '',
+      r.deviceType ?? '', r.malwareAlerts ?? '', r.complianceChecks ?? '',
       r.seedConfiguration ?? '', r.operatingSystem ?? '', r.followUpAction ?? '',
-      r.responseFromTicket ?? '', deriveTrackingStatus(rowIdToStatus.get(r.id)),
+      'Refer photo captured in folder',
+      deriveTrackingStatus(rowIdToStatus.get(r.id)),
+      '',
     ]);
   }
 
@@ -188,7 +192,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
       // Parse and import into DB using smart merge (preserves seed fields, keeps removed members)
       const parsed = await readTrackingRows(dest);
-      const { inserted, updated, preserved } = mergeFromUpload(parsed.map(r => ({
+      const { inserted, updated, preserved } = await mergeFromUpload(parsed.map(r => ({
         no:                 r.no ?? undefined,
         project:            r.project || undefined,
         name:               r.name,
@@ -204,7 +208,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         responseFromTicket: r.responseFromTicket || undefined,
         trackingStatus:     r.trackingStatus || undefined,
       })));
-      bumpTrackingVersion();
+      await bumpTrackingVersion();
 
       return NextResponse.json({
         message: 'Tracking file updated successfully',
@@ -229,7 +233,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ message: 'No members provided' }, { status: 400 });
     }
 
-    const allSubmissions = findAll();
+    const allSubmissions = await findAll();
     const submissionById = new Map(allSubmissions.map(s => [s.id, s]));
 
     const hasDate = month !== undefined && year !== undefined &&
@@ -241,7 +245,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // Build filtered tracking xlsx from DB rows
     {
-      const allDbRows = readActiveTrackingDB();
+      const allDbRows = await readActiveTrackingDB();
       const memberIdSet = new Set(members.filter(m => m.trackingRowNum).map(m => m.trackingRowNum as number));
       const idToMember = new Map(members.filter(m => m.trackingRowNum).map(m => [m.trackingRowNum as number, m]));
       const filteredDbRows = allDbRows.filter(r => memberIdSet.has(r.id));
@@ -249,18 +253,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       if (filteredDbRows.length > 0) {
         const outWb = new ExcelJS.Workbook();
         const outSheet = outWb.addWorksheet('Sheet1');
-        outSheet.addRow(['No', 'Project', 'Name', 'Email', 'Serial', 'Account', 'Device Type',
-          'Malware Alerts', 'Compliance Checks', 'Seed Configuration', 'Operating System',
-          'Follow Up Action', 'Response From Ticket', 'Tracking Status']);
+        outSheet.addRow(['No.', 'Project', 'Name', 'Account', 'Mail NCS', 'Serial Number', 'Type',
+          'Malware Alerts', 'Compliance Checks/Trellix', 'SEED Configuration', 'Operating System',
+          'Follow up action', 'EVD / Ticket', 'Status', 'Note']);
         for (const r of filteredDbRows) {
           const m = idToMember.get(r.id);
           const sub = m?.submissionId ? submissionById.get(m.submissionId) : undefined;
           outSheet.addRow([
-            m?.no ?? r.no ?? '', r.project ?? '', r.name ?? '', r.email ?? '',
-            r.serial ?? '', r.account ?? '', r.deviceType ?? '',
+            m?.no ?? r.no ?? '', r.project ?? '', r.name ?? '', r.account ?? '', r.email ?? '',
+            r.serial ?? '', r.deviceType ?? '',
             r.malwareAlerts ?? '', r.complianceChecks ?? '', r.seedConfiguration ?? '',
-            r.operatingSystem ?? '', r.followUpAction ?? '', r.responseFromTicket ?? '',
+            r.operatingSystem ?? '', r.followUpAction ?? '',
+            r.responseFromTicket ?? 'Refer photo captured in folder',
             deriveTrackingStatus(sub?.status),
+            '',
           ]);
         }
         const xlsxBuf = await outWb.xlsx.writeBuffer();
@@ -333,7 +339,7 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
 
     if (!rowNum || rowNum < 1) return NextResponse.json({ message: 'Invalid rowNum' }, { status: 400 });
 
-    const ok = updateSeedFields(rowNum, {
+    const ok = await updateSeedFields(rowNum, {
       ...(malwareAlerts    !== undefined && { malwareAlerts }),
       ...(complianceChecks !== undefined && { complianceChecks }),
       ...(seedConfiguration!== undefined && { seedConfiguration }),
