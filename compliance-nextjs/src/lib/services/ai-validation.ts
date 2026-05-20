@@ -91,28 +91,49 @@ const THIN_PROMPT = `You are a compliance image validator for thin client (Windo
 
 The submitted screenshot(s) MUST satisfy ALL of the following checks:
 
-WINDOWS SECURITY SCREEN — check each item on the Windows Security home screen:
-1. VIRUS_THREAT_PROTECTION    — "Virus & threat protection" shows a green tick (no current threats)
-2. ACCOUNT_PROTECTION         — "Account protection" shows a green tick
-3. FIREWALL_NETWORK_PROTECTION— "Firewall & network protection" shows a green tick
-4. APP_BROWSER_CONTROL        — "App & browser control" shows a green tick
-5. DEVICE_SECURITY            — "Device security" shows a green tick
-6. DEVICE_PERFORMANCE_HEALTH  — "Device performance & health" shows "No action needed"
+[COMMENTED OUT — security at a glance checks, may restore in the future]
+# WINDOWS SECURITY HOME SCREEN — check each item on the Windows Security home screen:
+# 1. VIRUS_THREAT_PROTECTION     — "Virus & threat protection" shows a green tick (no current threats)
+# 2. ACCOUNT_PROTECTION          — "Account protection" shows a green tick
+# 3. FIREWALL_NETWORK_PROTECTION — "Firewall & network protection" shows a green tick
+# 4. APP_BROWSER_CONTROL         — "App & browser control" shows a green tick
+# 5. DEVICE_SECURITY             — "Device security" shows a green tick
+# 6. DEVICE_PERFORMANCE_HEALTH   — "Device performance & health" shows "No action needed"
+[END COMMENTED OUT]
+
+WINDOWS SECURITY — SCAN OPTIONS SCREEN (NOT the home/overview screen):
+1. FULL_SCAN — The Windows Security > Virus & threat protection > Scan options page MUST be physically visible in the screenshot showing ALL of:
+   - A completed "Full scan" result (the text "full scan" must appear in the last scan line, e.g. "Last scan: ... (full scan)")
+   - "No current threats" text
+   - "0 threats found" text
+   - A scan date/time (last scan timestamp)
+   - Number of files scanned (any number followed by "files scanned")
+   STRICT RULE: If this page is not visible, or the completed scan result text is absent, set hasFullScan=false. The "Full scan" radio button being selected alone is NOT sufficient.
 
 WINDOWS UPDATE SCREEN:
-7. WINDOWS_UPDATE — Windows Update screen shows "Up to date" or "You're up to date"
+2. WINDOWS_UPDATE — The Windows Settings > Windows Update page MUST be physically visible in the screenshot.
+   WHAT TO LOOK FOR: The page heading text "Windows Update" AND the status text "You're up to date" or "Up to date" with a green checkmark icon must both appear in the screenshot.
+   HARD BLOCK — set hasWindowsUpdate=false if ANY of the following are true:
+   - The page shown is Windows Security (antivirus/threat protection/scan options) — this is NOT Windows Update
+   - The only update-related evidence is a completed scan or "No current threats" text — this is NOT Windows Update
+   - The Windows Update heading and "You're up to date" text are not both physically visible
+   - You cannot find the exact text "Windows Update" as a page title or heading in the screenshot
+   Do NOT infer, assume, or derive update status from any other screen. A full scan result does NOT imply Windows is up to date.
 
 TERMINAL / COMMAND LINE:
-8. SERIAL_NUMBER — A terminal window (PowerShell, CMD, or similar) is visible showing the device serial number output from a command such as Get-CimInstance Win32_BIOS, wmic bios get serialnumber, or equivalent
+3. SERIAL_NUMBER — A terminal window (PowerShell, CMD, or similar) MUST be physically visible showing a serial number value as output.
+   STRICT RULE: If no terminal window is visible, set hasSerialNumber=false. Partial wrapping of the serial number value is acceptable — do not fail this check due to text wrapping alone.
 
-ALL 8 checks must pass for valid=true. If any one fails, set valid=false and list it in failedChecks.
-For EVERY checklist item set to false, add a specific description to "failedChecks" explaining exactly what is missing.
-If confidence < 100, every reason for uncertainty must appear in "failedChecks".
+ALL 3 checks must pass for valid=true. If ANY ONE fails, set valid=false immediately.
+- Each check must be PHYSICALLY VISIBLE in the screenshot — do not infer, assume, or guess.
+- Do NOT set valid=true unless hasFullScan=true AND hasWindowsUpdate=true AND hasSerialNumber=true.
+- COMMON MISTAKE TO AVOID: Windows Security ≠ Windows Update. Seeing a scan result does NOT mean Windows Update is satisfied.
+- List every failed check in failedChecks with a specific reason.
 
-ALSO EXTRACT: the device serial number text visible in the terminal output.
+ALSO EXTRACT: the device serial number text visible in the terminal output (partial value is acceptable).
 
 Respond ONLY with valid JSON (no markdown):
-{"valid":true,"matchesType":true,"confidence":85,"reason":"...","deviceSerial":"extracted-serial-or-null","checklist":{"hasVirusThreatProtection":true,"hasAccountProtection":true,"hasFirewallNetworkProtection":true,"hasAppBrowserControl":true,"hasDeviceSecurity":true,"hasDevicePerformanceHealth":true,"hasWindowsUpdate":true,"hasSerialNumber":true},"failedChecks":[],"guidelines":[],"suggestion":null}`;
+{"valid":true,"matchesType":true,"confidence":100,"reason":"...","deviceSerial":"extracted-serial-or-null","checklist":{"hasFullScan":true,"hasWindowsUpdate":true,"hasSerialNumber":true},"failedChecks":[],"guidelines":[],"suggestion":null}`;
 
 function selectPrompt(expectedType: string): string {
   const t = expectedType.toLowerCase();

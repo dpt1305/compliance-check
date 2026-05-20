@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import ValidationGuidance from './ValidationGuidance';
 import ValidationResult from './ValidationResult';
 import Link from 'next/link';
@@ -8,7 +8,7 @@ import Link from 'next/link';
 const TYPE_SAMPLE_IMAGES: Record<string, string> = {
   windows: '/window_sample.png',
   mac: '/macos_sample.png',
-  thin: '/thin_sample.png',
+  thin: '/thin_sample_2.png',
 };
 
 function sampleImageSrcdoc(src: string) {
@@ -105,6 +105,8 @@ export default function DashboardForm() {
   const [fileError, setFileError] = useState<FileError | null>(null);
   const [fileValidating, setFileValidating] = useState(false);
   const [fileTouched, setFileTouched] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [supportedTypes, setSupportedTypes] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<SubmissionResponse | null>(null);
@@ -120,6 +122,49 @@ export default function DashboardForm() {
       .catch(() => showToast('Failed to load submission types', false));
   }, []);
 
+  const applyFile = useCallback(async (f: File) => {
+    setFile(f);
+    setFileTouched(true);
+    setFileValidating(true);
+    // Create preview URL (revoke previous one first)
+    setImagePreview(prev => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(f);
+    });
+    const err = await validateFile(f);
+    setFileError(err);
+    setFileValidating(false);
+  // All deps are stable React state setters + module-level validateFile
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Global paste handler — Ctrl+V anywhere on the page pastes clipboard image
+  useEffect(() => {
+    async function handlePaste(e: ClipboardEvent) {
+      const items = Array.from(e.clipboardData?.items ?? []);
+      const imgItem = items.find(i => i.type.startsWith('image/'));
+      if (!imgItem) return;
+      e.preventDefault();
+      const blob = imgItem.getAsFile();
+      if (!blob) return;
+      const ext = imgItem.type === 'image/png' ? 'png' : imgItem.type === 'image/webp' ? 'webp' : 'jpg';
+      const pasted = new File([blob], `clipboard.${ext}`, { type: imgItem.type });
+      await applyFile(pasted);
+    }
+    document.addEventListener('paste', handlePaste);
+    return () => document.removeEventListener('paste', handlePaste);
+  }, [applyFile]);
+
+  function clearFile(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setFile(null);
+    setFileError(null);
+    setFileTouched(false);
+    setImagePreview(prev => { if (prev) URL.revokeObjectURL(prev); return null; });
+    if (fileRef.current) fileRef.current.value = '';
+  }
+
   function showToast(msg: string, ok: boolean) {
     setToast({ msg, ok });
     setTimeout(() => setToast(null), 4000);
@@ -127,13 +172,8 @@ export default function DashboardForm() {
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0] ?? null;
-    setFile(f);
-    setFileTouched(true);
-    if (!f) { setFileError({ type: 'required' }); return; }
-    setFileValidating(true);
-    const err = await validateFile(f);
-    setFileError(err);
-    setFileValidating(false);
+    if (!f) { setFileTouched(true); setFileError({ type: 'required' }); return; }
+    await applyFile(f);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -259,40 +299,102 @@ export default function DashboardForm() {
               className="hidden"
               id="file-upload"
             />
-            <div className="flex flex-col gap-2">
-              <label
-                htmlFor="file-upload"
-                className="btn-secondary cursor-pointer w-fit"
+
+            {/* Drop zone */}
+            <div className="relative">
+            <label
+              htmlFor="file-upload"
+              onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={async e => {
+                e.preventDefault();
+                setIsDragging(false);
+                const f = e.dataTransfer.files?.[0];
+                if (f) await applyFile(f);
+              }}
+              className={`flex flex-col items-center justify-center gap-3 w-full rounded-xl border-2 border-dashed cursor-pointer transition-colors px-6 py-8
+                ${isDragging
+                  ? 'border-primary-500 bg-primary-50'
+                  : fileTouched && fileError
+                    ? 'border-red-400 bg-red-50'
+                    : file && !fileError
+                      ? 'border-green-400 bg-green-50'
+                      : 'border-gray-300 bg-gray-50 hover:border-primary-400 hover:bg-primary-50'
+                }`}
+            >
+              {fileValidating ? (
+                <>
+                  <span className="spinner w-6 h-6 border-gray-400 border-t-transparent"></span>
+                  <span className="text-sm text-gray-500">Validating…</span>
+                </>
+              ) : file && !fileError ? (
+                <>
+                  {imagePreview && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={imagePreview}
+                      alt="Preview"
+                      className="max-h-40 max-w-full rounded-lg object-contain shadow-sm"
+                    />
+                  )}
+                  <div className="text-center">
+                    <p className="text-sm font-medium text-gray-800 break-all">{file.name}</p>
+                    <p className="text-xs text-gray-500">{formatBytes(file.size)} — click or drop to replace</p>
+                  </div>
+                </>
+              ) : file && fileError ? (
+                <>
+                  {imagePreview && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={imagePreview}
+                      alt="Preview"
+                      className="max-h-32 max-w-full rounded-lg object-contain shadow-sm opacity-60"
+                    />
+                  )}
+                  <div className="text-center">
+                    <p className="text-sm font-medium text-red-700 break-all">{file.name}</p>
+                    <p className="text-xs text-gray-500">{formatBytes(file.size)} — click or drop to replace</p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <span className="text-4xl">{isDragging ? '📂' : '☁️'}</span>
+                  <div className="text-center space-y-1">
+                    <p className="text-sm font-semibold text-gray-700">
+                      {isDragging ? 'Drop image here' : 'Click to browse or drag & drop'}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      Or press <kbd className="px-1.5 py-0.5 rounded border border-gray-300 bg-white text-gray-600 font-mono text-xs">Ctrl+V</kbd> to paste from clipboard
+                    </p>
+                    <p className="text-xs text-gray-400">JPG, PNG, WEBP — max 10 MB</p>
+                  </div>
+                </>
+              )}
+            </label>
+
+            {/* Clear button — shown when a file is selected */}
+            {file && !fileValidating && (
+              <button
+                type="button"
+                onClick={clearFile}
+                title="Remove image"
+                className="absolute top-2 right-2 z-10 flex items-center justify-center w-6 h-6 rounded-full bg-gray-700 hover:bg-red-600 text-white text-xs leading-none transition-colors shadow"
               >
-                <span>☁️</span>
-                {file ? 'Change Image' : 'Choose Image'}
-              </label>
-
-              {fileValidating && (
-                <div className="flex items-center gap-2 text-sm text-gray-500">
-                  <span className="spinner w-4 h-4 border-gray-400 border-t-transparent"></span>
-                  Validating…
-                </div>
-              )}
-
-              {file && !fileValidating && (
-                <div className="flex items-center gap-2 px-3 py-2 bg-indigo-50 rounded border border-indigo-200 text-sm">
-                  <span>🖼️</span>
-                  <span className="flex-1 break-all">{file.name}</span>
-                  <span className="text-gray-500 text-xs whitespace-nowrap">{formatBytes(file.size)}</span>
-                </div>
-              )}
-
-              {fileTouched && fileError && !fileValidating && (
-                <div className="space-y-1">
-                  {fileError.type === 'required' && <span className="form-error">Image is required</span>}
-                  {fileError.type === 'fileTooLarge' && <span className="form-error">File too large ({fileError.actualMb} MB). Max: 10 MB</span>}
-                  {fileError.type === 'invalidExtension' && <span className="form-error">Invalid extension (.{fileError.actual}). Allowed: {fileError.allowed}</span>}
-                  {fileError.type === 'invalidMagicBytes' && <span className="form-error">File is not a valid image (corrupt or unsupported format)</span>}
-                  {fileError.type === 'mimeTypeMismatch' && <span className="form-error">File extension does not match actual file content</span>}
-                </div>
-              )}
+                ✕
+              </button>
+            )}
             </div>
+
+            {fileTouched && fileError && !fileValidating && (
+              <div className="mt-1 space-y-1">
+                {fileError.type === 'required' && <span className="form-error">Image is required</span>}
+                {fileError.type === 'fileTooLarge' && <span className="form-error">File too large ({fileError.actualMb} MB). Max: 10 MB</span>}
+                {fileError.type === 'invalidExtension' && <span className="form-error">Invalid extension (.{fileError.actual}). Allowed: {fileError.allowed}</span>}
+                {fileError.type === 'invalidMagicBytes' && <span className="form-error">File is not a valid image (corrupt or unsupported format)</span>}
+                {fileError.type === 'mimeTypeMismatch' && <span className="form-error">File extension does not match actual file content</span>}
+              </div>
+            )}
           </div>
 
           {/* Submit */}
