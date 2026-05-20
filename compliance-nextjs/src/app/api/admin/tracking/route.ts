@@ -13,6 +13,8 @@ import { matchesTrackingRow } from '@/lib/db/tracking-repo';
 import { bumpTrackingVersionAsync as bumpTrackingVersion } from '@/lib/db/index';
 import { getImageBuffer } from '@/lib/utils/file-storage';
 
+export const dynamic = 'force-dynamic';
+
 const MONTH_NAMES = [
   'January','February','March','April','May','June',
   'July','August','September','October','November','December',
@@ -132,16 +134,18 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
   const sheet = wb.addWorksheet('Sheet1');
 
   // Header row
-  sheet.addRow(['No', 'Project', 'Name', 'Email', 'Serial', 'Account', 'Device Type',
-    'Malware Alerts', 'Compliance Checks', 'Seed Configuration', 'Operating System',
-    'Follow Up Action', 'Response From Ticket', 'Tracking Status']);
+  sheet.addRow(['No.', 'Project', 'Name', 'Account', 'Mail NCS', 'Serial Number', 'Type',
+    'Malware Alerts', 'Compliance Checks/Trellix', 'SEED Configuration', 'Operating System',
+    'Follow up action', 'EVD / Ticket', 'Status', 'Note']);
 
   for (const r of rows) {
     sheet.addRow([
-      r.no ?? '', r.project ?? '', r.name ?? '', r.email ?? '', r.serial ?? '',
-      r.account ?? '', r.deviceType ?? '', r.malwareAlerts ?? '', r.complianceChecks ?? '',
+      r.no ?? '', r.project ?? '', r.name ?? '', r.account ?? '', r.email ?? '', r.serial ?? '',
+      r.deviceType ?? '', r.malwareAlerts ?? '', r.complianceChecks ?? '',
       r.seedConfiguration ?? '', r.operatingSystem ?? '', r.followUpAction ?? '',
-      r.responseFromTicket ?? '', deriveTrackingStatus(rowIdToStatus.get(r.id)),
+      r.responseFromTicket ?? 'Refer photo captured in folder',
+      deriveTrackingStatus(rowIdToStatus.get(r.id)),
+      '',
     ]);
   }
 
@@ -249,18 +253,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       if (filteredDbRows.length > 0) {
         const outWb = new ExcelJS.Workbook();
         const outSheet = outWb.addWorksheet('Sheet1');
-        outSheet.addRow(['No', 'Project', 'Name', 'Email', 'Serial', 'Account', 'Device Type',
-          'Malware Alerts', 'Compliance Checks', 'Seed Configuration', 'Operating System',
-          'Follow Up Action', 'Response From Ticket', 'Tracking Status']);
+        outSheet.addRow(['No.', 'Project', 'Name', 'Account', 'Mail NCS', 'Serial Number', 'Type',
+          'Malware Alerts', 'Compliance Checks/Trellix', 'SEED Configuration', 'Operating System',
+          'Follow up action', 'EVD / Ticket', 'Status', 'Note']);
         for (const r of filteredDbRows) {
           const m = idToMember.get(r.id);
           const sub = m?.submissionId ? submissionById.get(m.submissionId) : undefined;
           outSheet.addRow([
-            m?.no ?? r.no ?? '', r.project ?? '', r.name ?? '', r.email ?? '',
-            r.serial ?? '', r.account ?? '', r.deviceType ?? '',
+            m?.no ?? r.no ?? '', r.project ?? '', r.name ?? '', r.account ?? '', r.email ?? '',
+            r.serial ?? '', r.deviceType ?? '',
             r.malwareAlerts ?? '', r.complianceChecks ?? '', r.seedConfiguration ?? '',
-            r.operatingSystem ?? '', r.followUpAction ?? '', r.responseFromTicket ?? '',
+            r.operatingSystem ?? '', r.followUpAction ?? '',
+            r.responseFromTicket ?? 'Refer photo captured in folder',
             deriveTrackingStatus(sub?.status),
+            '',
           ]);
         }
         const xlsxBuf = await outWb.xlsx.writeBuffer();

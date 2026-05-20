@@ -1,42 +1,69 @@
-import { findAll } from '../db/submission-repo';
+import { readAll } from '../db/tracking-repo';
 import ExcelJS from 'exceljs';
 
 export async function generateReport(): Promise<Buffer> {
-  const submissions = await findAll();
+  const members = await readAll();
   const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet('Compliance Submissions');
+  const sheet = workbook.addWorksheet('Compliance');
 
-  // Header row
   sheet.columns = [
-    { header: 'ID',                key: 'id',              width: 8  },
-    { header: 'Account',           key: 'account',         width: 20 },
-    { header: 'Submission Type',   key: 'submissionType',  width: 18 },
-    { header: 'Status',            key: 'status',          width: 12 },
-    { header: 'Image URL',         key: 'imageUrl',        width: 40 },
-    { header: 'Saved Filename',    key: 'imageSavedName',  width: 35 },
-    { header: 'Submission Date',   key: 'submissionDate',  width: 24 },
-    { header: 'Validation Result', key: 'validationResult',width: 50 },
+    { header: 'No.',                        key: 'no',                width: 6  },
+    { header: 'Project',                    key: 'project',           width: 16 },
+    { header: 'Name',                       key: 'name',              width: 24 },
+    { header: 'Account',                    key: 'account',           width: 20 },
+    { header: 'Mail NCS',                   key: 'email',             width: 28 },
+    { header: 'Serial Number',              key: 'serial',            width: 20 },
+    { header: 'Type',                       key: 'deviceType',        width: 14 },
+    { header: 'Malware Alerts',             key: 'malwareAlerts',     width: 16 },
+    { header: 'Compliance Checks/Trellix',  key: 'complianceChecks',  width: 24 },
+    { header: 'SEED Configuration',         key: 'seedConfiguration', width: 20 },
+    { header: 'Operating System',           key: 'operatingSystem',   width: 18 },
+    { header: 'Follow up action',           key: 'followUpAction',    width: 20 },
+    { header: 'EVD / Ticket',               key: 'evdTicket',         width: 32 },
+    { header: 'Status',                     key: 'status',            width: 16 },
+    { header: 'Note',                       key: 'note',              width: 20 },
   ];
 
   // Style header
-  sheet.getRow(1).eachCell(cell => {
+  const headerRow = sheet.getRow(1);
+  headerRow.eachCell(cell => {
     cell.font = { bold: true };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB8CCE4' } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    cell.border = {
+      top: { style: 'thin' }, bottom: { style: 'thin' },
+      left: { style: 'thin' }, right: { style: 'thin' },
+    };
   });
+  headerRow.height = 20;
 
-  // Data rows
-  for (const s of submissions) {
-    sheet.addRow({
-      id: s.id,
-      account: s.account,
-      submissionType: s.submissionType,
-      status: s.status,
-      imageUrl: s.imageUrl ?? '',
-      imageSavedName: s.imageSavedName ?? '',
-      submissionDate: s.submissionDate ?? '',
-      validationResult: s.validationResult ?? '',
+  // Data rows — skip removed members
+  const active = members.filter(m => !m.removedFromTracking);
+  active.forEach((m, index) => {
+    const row = sheet.addRow({
+      no:                m.no ?? (index + 1),
+      project:           m.project ?? '',
+      name:              m.name,
+      account:           m.account ?? '',
+      email:             m.email ?? '',
+      serial:            m.serial ?? '',
+      deviceType:        m.deviceType ?? '',
+      malwareAlerts:     m.malwareAlerts ?? '',
+      complianceChecks:  m.complianceChecks ?? '',
+      seedConfiguration: m.seedConfiguration ?? '',
+      operatingSystem:   m.operatingSystem ?? '',
+      followUpAction:    m.followUpAction ?? '',
+      evdTicket:         m.responseFromTicket ?? 'Refer photo captured in folder',
+      status:            m.trackingStatus ?? '',
+      note:              '',
     });
-  }
+    row.eachCell(cell => {
+      cell.border = {
+        top: { style: 'thin' }, bottom: { style: 'thin' },
+        left: { style: 'thin' }, right: { style: 'thin' },
+      };
+    });
+  });
 
   const buffer = await workbook.xlsx.writeBuffer();
   return Buffer.from(buffer);
