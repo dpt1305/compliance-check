@@ -143,7 +143,7 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
       r.no ?? '', r.project ?? '', r.name ?? '', r.account ?? '', r.email ?? '', r.serial ?? '',
       r.deviceType ?? '', r.malwareAlerts ?? '', r.complianceChecks ?? '',
       r.seedConfiguration ?? '', r.operatingSystem ?? '', r.followUpAction ?? '',
-      r.responseFromTicket ?? 'Refer photo captured in folder',
+      'Refer photo captured in folder',
       deriveTrackingStatus(rowIdToStatus.get(r.id)),
       '',
     ]);
