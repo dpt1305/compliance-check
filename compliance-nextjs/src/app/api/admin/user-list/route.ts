@@ -233,11 +233,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     result = result.map(e => applyPeriodMask(e, month!, year!)).filter(Boolean) as UserListEntry[];
   }
 
-  // 3. Tag search — AND logic across all string fields
+  // 3. Tag search — OR logic: row matches if ANY tag matches ANY string field
   const activeTags = tagsParam.map(t => t.trim().toLowerCase()).filter(Boolean);
   if (activeTags.length > 0) {
     result = result.filter(row =>
-      activeTags.every(tag =>
+      activeTags.some(tag =>
         SEARCH_KEYS.some(key => {
           const val = row[key as keyof UserListEntry];
           return typeof val === 'string' && val.toLowerCase().includes(tag);
