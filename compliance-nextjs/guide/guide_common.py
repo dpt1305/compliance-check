@@ -330,6 +330,87 @@ hr{border:none;border-top:1px solid var(--gray-bd);margin:32px 0}
   .toc-page{page-break-after:always}
   .toc-list li a{text-decoration:none;color:inherit}
 }
+
+/* ── Mobile ── */
+@media (max-width: 767px) {
+  /* Sidebar: hidden by default, toggled via JS */
+  #sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    z-index: 200;
+  }
+  #sidebar.open { transform: translateX(0); }
+
+  /* Overlay behind open sidebar */
+  #sb-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.45);
+    z-index: 190;
+  }
+  #sb-overlay.open { display: block; }
+
+  /* Content fills full width */
+  #content { margin-left: 0 !important; }
+
+  /* Hamburger button */
+  #sb-toggle {
+    display: flex !important;
+    position: fixed;
+    top: 12px; left: 12px;
+    z-index: 300;
+    width: 40px; height: 40px;
+    border-radius: 8px;
+    background: var(--primary);
+    color: white;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+  }
+
+  /* Cover page mobile */
+  .cover { padding: 60px 24px; min-height: auto; }
+  .cover .logo { font-size: 56px; }
+  .cover h1 { font-size: 26px; }
+  .cover h2 { font-size: 14px; }
+  .cover .meta { gap: 20px; }
+  .cover .badges { flex-direction: column; align-items: center; }
+
+  /* Page padding */
+  .page { padding: 56px 16px 32px; }
+
+  /* Feature cards */
+  .feature { padding: 18px 16px; }
+  .feature-title { font-size: 15px; }
+
+  /* Grids → single column */
+  .two-col { grid-template-columns: 1fr !important; }
+  .three-col { grid-template-columns: 1fr !important; }
+
+  /* Tables → horizontal scroll */
+  .ref-table-wrap, .toc-list { overflow-x: auto; }
+  .ref-table { min-width: 480px; }
+
+  /* Screenshots */
+  .screenshot { max-width: 100%; }
+
+  /* TOC */
+  .toc-list li { flex-wrap: wrap; }
+  .toc-list li .pg { display: none; }
+
+  /* Steps */
+  .steps li::before { min-width: 24px; height: 24px; font-size: 10px; }
+
+  /* Back to top */
+  #back-top { bottom: 16px; right: 16px; width: 36px; height: 36px; font-size: 16px; }
+}
+
+@media (min-width: 768px) {
+  #sb-toggle { display: none !important; }
+}
 """
 
 # ── Shared JS ─────────────────────────────────────────────────────────────────
@@ -370,6 +451,22 @@ document.querySelectorAll('a[href^="#"]').forEach(a => {
     }
   });
 });
+
+// ── Mobile sidebar toggle ─────────────────────────────────────────────────────
+const sbToggle  = document.getElementById('sb-toggle');
+const sbOverlay = document.getElementById('sb-overlay');
+const sidebar   = document.getElementById('sidebar');
+
+function openSidebar()  { sidebar.classList.add('open');  sbOverlay.classList.add('open');  }
+function closeSidebar() { sidebar.classList.remove('open'); sbOverlay.classList.remove('open'); }
+
+if (sbToggle)  sbToggle.addEventListener('click', openSidebar);
+if (sbOverlay) sbOverlay.addEventListener('click', closeSidebar);
+
+// Close sidebar when a nav link is clicked on mobile
+document.querySelectorAll('#sidebar a').forEach(a => {
+  a.addEventListener('click', () => { if (window.innerWidth < 768) closeSidebar(); });
+});
 """
 
 # ── HTML shell ────────────────────────────────────────────────────────────────
@@ -386,6 +483,12 @@ def html_shell(title: str, sidebar_html: str, body_html: str, extra_css="") -> s
 </style>
 </head>
 <body>
+
+<!-- Mobile hamburger button -->
+<button id="sb-toggle" aria-label="Open navigation">☰</button>
+
+<!-- Mobile overlay -->
+<div id="sb-overlay"></div>
 
 {sidebar_html}
 

@@ -82,11 +82,11 @@ function AdminShell({ children }: { children: React.ReactNode }) {
 
       {/* Toolbar */}
       <header className="bg-primary-600 text-white shadow-md">
-        <div className="flex items-center px-4 py-3 gap-3">
-          <span className="text-lg">🛡️</span>
-          <span className="font-semibold text-lg">Compliance Admin</span>
+        <div className="flex flex-wrap items-center gap-2 px-4 py-3">
+          <span className="text-lg shrink-0">🛡️</span>
+          <span className="hidden text-lg font-semibold sm:inline">Compliance Admin</span>
           <div className="flex-1" />
-          <span className="text-sm opacity-80 mr-2">{username}</span>
+          <span className="hidden text-sm opacity-80 sm:inline">{username}</span>
 
           {/* Admin Guide button — prominent, pulsing amber */}
           <a
@@ -94,28 +94,28 @@ function AdminShell({ children }: { children: React.ReactNode }) {
             target="_blank"
             rel="noopener noreferrer"
             title="Open Admin Guide"
-            className="relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold
-                       bg-amber-400 text-amber-900 hover:bg-amber-300 transition-colors shadow-md
-                       ring-2 ring-amber-300/60 hover:ring-amber-200"
+            className="relative inline-flex shrink-0 items-center gap-1.5 rounded-full bg-amber-400 px-3 py-1.5 text-xs font-bold
+                       text-amber-900 shadow-md transition-colors ring-2 ring-amber-300/60 hover:bg-amber-300
+                       hover:ring-amber-200"
           >
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-300 opacity-40 pointer-events-none" />
-            <span className="relative flex items-center gap-1.5">📖 Guide</span>
+            <span className="relative flex items-center gap-1.5">📖<span className="hidden sm:inline"> Guide</span></span>
           </a>
 
-          <button onClick={exportExcel} disabled={isExporting} className="btn-icon text-white hover:bg-white/20" title="Export to Excel">
+          <button onClick={exportExcel} disabled={isExporting} className="btn-icon shrink-0 text-white hover:bg-white/20" title="Export to Excel">
             {isExporting ? <span className="spinner w-4 h-4 border-white border-t-transparent"></span> : '📥'}
           </button>
-          <Link href="/dashboard" className="btn-icon text-white hover:bg-white/20" title="User Dashboard">🏠</Link>
-          <button onClick={logout} className="btn-icon text-white hover:bg-white/20" title="Logout">🚪</button>
+          <Link href="/dashboard" className="btn-icon shrink-0 text-white hover:bg-white/20" title="User Dashboard">🏠</Link>
+          <button onClick={logout} className="btn-icon shrink-0 text-white hover:bg-white/20" title="Logout">🚪</button>
         </div>
 
         {/* Tab nav */}
-        <nav className="flex px-4 gap-1 pb-0">
+        <nav className="flex overflow-x-auto px-4 gap-1 pb-0">
           {navLinks.map(link => (
             <Link
               key={link.href}
               href={link.href}
-              className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition border-b-2 ${
+              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-4 py-2.5 text-sm font-medium transition border-b-2 ${
                 pathname === link.href
                   ? 'border-white text-white'
                   : 'border-transparent text-white/70 hover:text-white hover:border-white/50'

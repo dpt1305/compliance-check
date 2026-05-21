@@ -31,10 +31,10 @@ export default function Notifications() {
   }
 
   return (
-    <div className="p-4 max-w-2xl space-y-4">
+    <div className="mx-auto w-full max-w-2xl space-y-4 p-4 sm:p-6">
       {/* Send card */}
-      <div className="card">
-        <div className="flex items-center gap-3 p-5 border-b border-gray-100">
+      <div className="card overflow-hidden">
+        <div className="flex items-start gap-3 border-b border-gray-100 p-4 sm:p-6">
           <span className="text-2xl">🔔</span>
           <div>
             <h2 className="font-semibold text-gray-900">Send Deadline Reminder</h2>
@@ -42,7 +42,7 @@ export default function Notifications() {
           </div>
         </div>
 
-        <div className="p-5 space-y-4">
+        <div className="space-y-4 p-4 sm:p-6">
           {lastSentAt && (
             <div className="alert-info">
               <span>🕐</span>
@@ -56,7 +56,7 @@ export default function Notifications() {
           <div className="form-field">
             <label className="form-label">Notification message</label>
             <textarea
-              className="form-input min-h-[100px]"
+              className="form-input min-h-[100px] w-full"
               value={message}
               onChange={e => { setMessage(e.target.value); setSendSuccess(false); setSendError(''); }}
               placeholder="Enter reminder message…"
@@ -80,7 +80,7 @@ export default function Notifications() {
             <button
               onClick={send}
               disabled={!message.trim() || isSending}
-              className="btn-primary"
+              className="btn-primary w-full sm:w-auto"
             >
               {isSending ? (
                 <><span className="spinner w-4 h-4 border-white border-t-transparent"></span> Sending…</>
@@ -93,7 +93,7 @@ export default function Notifications() {
       </div>
 
       {/* Info card */}
-      <div className="card p-5">
+      <div className="card p-4 sm:p-6">
         <div className="flex items-center gap-2 mb-3">
           <span>ℹ️</span>
           <h3 className="font-semibold text-gray-800">Notification Settings</h3>

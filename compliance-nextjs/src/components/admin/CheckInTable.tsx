@@ -87,24 +87,24 @@ export default function CheckInTable() {
       )}
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3 mb-4">
+      <div className="mb-4 flex flex-wrap gap-2">
         <MultiSelectDropdown
           options={availableProjects}
           selected={projectFilter}
           onChange={setProjectFilter}
           placeholder="All projects"
-          className="w-48"
+          className="w-full sm:w-48"
         />
-        <select className="form-select w-40" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+        <select className="form-select w-full sm:w-40" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
           <option value="">All statuses</option>
           {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
-        <input type="date" className="form-input w-40" value={dateFrom} onChange={e => setDateFrom(e.target.value)} placeholder="From" />
-        <input type="date" className="form-input w-40" value={dateTo} onChange={e => setDateTo(e.target.value)} placeholder="To" />
-        <button onClick={() => { setProjectFilter(null); setStatusFilter(''); setDateFrom(''); setDateTo(''); }} className="btn-secondary text-sm">
+        <input type="date" className="form-input w-full sm:w-40" value={dateFrom} onChange={e => setDateFrom(e.target.value)} placeholder="From" />
+        <input type="date" className="form-input w-full sm:w-40" value={dateTo} onChange={e => setDateTo(e.target.value)} placeholder="To" />
+        <button onClick={() => { setProjectFilter(null); setStatusFilter(''); setDateFrom(''); setDateTo(''); }} className="btn-secondary w-full text-sm sm:w-auto">
           🧹 Clear
         </button>
-        <button onClick={loadData} disabled={isLoading} className="btn-secondary text-sm">
+        <button onClick={loadData} disabled={isLoading} className="btn-secondary w-full text-sm sm:w-auto">
           {isLoading ? <span className="spinner w-4 h-4 border-gray-400"></span> : '🔄'}
         </button>
       </div>
@@ -127,8 +127,8 @@ export default function CheckInTable() {
       ) : (
         <>
           {/* Grid */}
-          <div className="card overflow-x-auto">
-            <table className="data-table">
+          <div className="card -mx-4 w-full overflow-x-auto sm:mx-0">
+            <table className="data-table min-w-[600px]">
               <thead>
                 <tr>
                   <th className="sticky left-0 bg-gray-50">Account</th>
@@ -163,7 +163,7 @@ export default function CheckInTable() {
           </div>
 
           {/* Legend */}
-          <div className="flex gap-3 mt-3 text-xs">
+          <div className="mt-3 flex flex-wrap gap-3 text-xs">
             <span className={`px-2 py-1 rounded border ${cellClass.APPROVED}`}>APPROVED</span>
             <span className={`px-2 py-1 rounded border ${cellClass.PENDING}`}>PENDING</span>
             <span className={`px-2 py-1 rounded border ${cellClass.REJECTED}`}>REJECTED</span>

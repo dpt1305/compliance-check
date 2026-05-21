@@ -58,39 +58,39 @@ export default function ValidationGuidance({ submissionType }: Props) {
         : 'Provide either: (1) SEED dashboard + timestamp, OR (2) System info + timestamp, OR (3) Trellix status showing "ok"';
 
   return (
-    <div className="card p-4 border border-blue-100 bg-blue-50">
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-blue-600 text-lg">ℹ️</span>
-        <div>
+    <div className="card border border-blue-100 bg-blue-50 p-3 sm:p-4">
+      <div className="mb-3 flex items-start gap-2 sm:items-center">
+        <span className="mt-0.5 text-lg text-blue-600 sm:mt-0">ℹ️</span>
+        <div className="min-w-0">
           <div className="font-semibold text-gray-800 capitalize">{submissionType} Compliance Requirements</div>
           <div className="text-xs text-gray-500">Your screenshot must include these elements</div>
         </div>
       </div>
 
-      <p className="text-sm text-gray-700 mb-3">{guidanceText}</p>
+      <p className="mb-3 text-sm text-gray-700">{guidanceText}</p>
 
-      <div className="space-y-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {checklist.map(item => (
-          <div key={item.title} className="flex items-start gap-3">
-            <span className="text-lg mt-0.5">{item.icon}</span>
-            <div className="flex-1">
-              <div className="flex items-center gap-2 text-sm font-medium text-gray-800">
-                {item.title}
+          <div key={item.title} className="flex items-start gap-3 rounded-lg border border-blue-100 bg-white/80 p-3">
+            <span className="mt-0.5 text-lg">{item.icon}</span>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-col items-start gap-1 text-sm font-medium text-gray-800 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
+                <span>{item.title}</span>
                 {item.required ? (
-                  <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">REQUIRED</span>
+                  <span className="rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-700">REQUIRED</span>
                 ) : (
-                  <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded font-medium">OPTIONAL</span>
+                  <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600">OPTIONAL</span>
                 )}
               </div>
-              <div className="text-xs text-gray-600">{item.description}</div>
+              <div className="text-xs text-gray-600 sm:text-sm">{item.description}</div>
             </div>
           </div>
         ))}
       </div>
 
-      <div className="mt-3 pt-3 border-t border-blue-200">
-        <div className="text-xs font-semibold text-gray-700 mb-1">💡 Tips:</div>
-        <ul className="text-xs text-gray-600 space-y-1 list-disc list-inside">
+      <div className="mt-4 border-t border-blue-200 pt-3">
+        <div className="mb-2 text-xs font-semibold text-gray-700">💡 Tips:</div>
+        <ul className="ml-4 list-disc space-y-2 text-xs text-gray-600 sm:text-sm">
           {type === 'windows' && (
             <>
               <li><strong>SEED dashboard is required</strong> — open the SEED app and capture the dashboard showing all 4 metric counters</li>
@@ -113,7 +113,7 @@ export default function ValidationGuidance({ submissionType }: Props) {
               <li>Open <strong>Windows Security</strong> → <strong>Virus &amp; threat protection</strong> → click <strong>&quot;Scan options&quot;</strong> — capture the page showing the last Full scan result, date, 0 threats, and files scanned count</li>
               <li>Do <strong>NOT</strong> capture the Windows Security home screen (the six-tile overview) — the <strong>Scan options / scan results page</strong> is required</li>
               <li>Open <strong>Windows Update</strong> (Settings → Windows Update) and capture the &quot;Up to date&quot; screen</li>
-              <li>Open <strong>PowerShell</strong> or <strong>Command Prompt</strong> and run: <code>powershell -Command &quot;(Get-CimInstance Win32_BIOS).SerialNumber&quot;</code> — capture the output showing your serial number</li>
+              <li>Open <strong>PowerShell</strong> or <strong>Command Prompt</strong> and run: <code className="break-all">powershell -Command &quot;(Get-CimInstance Win32_BIOS).SerialNumber&quot;</code> — capture the output showing your serial number</li>
               <li>You may combine all elements into one screenshot or submit separate captures</li>
             </>
           )}

@@ -1102,11 +1102,11 @@ export default function UserList() {
       </div>
 
       {/* Toolbar row 1: tag search + status + period */}
-      <div className="flex flex-wrap items-center gap-2 mb-2">
+      <div className="mb-2 flex flex-wrap gap-2">
         {/* Tag search input */}
         <div
-          className="flex flex-wrap items-center gap-1 min-h-[38px] px-2 py-1 border border-gray-300 rounded bg-white cursor-text focus-within:ring-2 focus-within:ring-indigo-400 focus-within:border-indigo-400"
-          style={{ minWidth: '220px', maxWidth: '480px' }}
+          className="flex min-h-[38px] w-full flex-wrap items-center gap-1 rounded border border-gray-300 bg-white px-2 py-1 cursor-text focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-400 sm:w-auto"
+          style={{ minWidth: 0, maxWidth: '480px' }}
           onClick={() => tagInputRef.current?.focus()}
         >
           {filterTags.map(tag => (
@@ -1151,15 +1151,15 @@ export default function UserList() {
           selected={filterProjects}
           onChange={setFilterProjects}
           placeholder="All projects"
-          className="w-48"
+          className="w-full sm:w-48"
         />
 
         {/* Period filter */}
-        <select className="form-select w-36" value={filterMonth} onChange={e => setFilterMonth(e.target.value)}>
+        <select className="form-select w-full sm:w-36" value={filterMonth} onChange={e => setFilterMonth(e.target.value)}>
           <option value="">All months</option>
           {MONTH_NAMES.map((m, i) => <option key={m} value={String(i + 1)}>{m}</option>)}
         </select>
-        <select className="form-select w-28" value={filterYear} onChange={e => setFilterYear(e.target.value)}>
+        <select className="form-select w-full sm:w-28" value={filterYear} onChange={e => setFilterYear(e.target.value)}>
           <option value="">All years</option>
           {yearOptions.map(y => <option key={y} value={String(y)}>{y}</option>)}
         </select>
@@ -1174,10 +1174,10 @@ export default function UserList() {
       </div>
 
       {/* Toolbar row 2: actions */}
-      <div className="flex flex-wrap items-center gap-2 mb-3">
+      <div className="mb-3 flex flex-wrap gap-2">
         <button
           onClick={openAddMember}
-          className="btn-primary flex items-center gap-1.5 text-sm"
+          className="btn-primary flex w-full items-center justify-center gap-1.5 text-sm sm:w-auto"
           title="Add new member to tracking.xlsx"
         >
           ➕ Add Member
@@ -1186,7 +1186,7 @@ export default function UserList() {
         <button
           onClick={() => uploadRef.current?.click()}
           disabled={isUploading}
-          className="btn-secondary flex items-center gap-1.5 text-sm"
+          className="btn-secondary flex w-full items-center justify-center gap-1.5 text-sm sm:w-auto"
           title="Upload new tracking.xlsx to replace server file"
         >
           {isUploading
@@ -1196,7 +1196,7 @@ export default function UserList() {
         <button
           onClick={handleDownload}
           disabled={isDownloading}
-          className="btn-secondary flex items-center gap-1.5 text-sm"
+          className="btn-secondary flex w-full items-center justify-center gap-1.5 text-sm sm:w-auto"
           title={
             filterTags.length > 0 || filterProjects !== null || filterMonth || filterYear
               ? `Download filtered ZIP: ${total} member(s) currently shown`
@@ -1214,7 +1214,7 @@ export default function UserList() {
           <button
             onClick={handleClearPeriod}
             disabled={isClearing}
-            className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded border border-red-300 bg-red-50 text-red-700 hover:bg-red-100 transition disabled:opacity-50"
+            className="flex w-full items-center justify-center gap-1.5 rounded border border-red-300 bg-red-50 px-3 py-1.5 text-sm text-red-700 transition hover:bg-red-100 disabled:opacity-50 sm:w-auto"
             title={`Delete all submissions and images for ${MONTH_NAMES[parseInt(filterMonth) - 1]} ${filterYear}`}
           >
             {isClearing
@@ -1226,26 +1226,26 @@ export default function UserList() {
         <button
           onClick={() => { if (reviewItems.length > 0) setReviewIdx(0); }}
           disabled={reviewItems.length === 0}
-          className="btn-secondary flex items-center gap-1.5 text-sm"
+          className="btn-secondary flex w-full items-center justify-center gap-1.5 text-sm sm:w-auto"
           title={reviewItems.length > 0 ? `Review ${reviewItems.length} submission(s)` : 'No submissions to review'}
         >
           🔍 Review {reviewItems.length > 0 ? `(${reviewItems.length})` : ''}
         </button>
-        <button onClick={loadData} disabled={isLoading} className="btn-secondary" title="Refresh">
+        <button onClick={loadData} disabled={isLoading} className="btn-secondary w-full sm:w-auto" title="Refresh">
           {isLoading ? <span className="spinner w-4 h-4 border-gray-400 border-t-transparent"></span> : '🔄'}
         </button>
       </div>
 
       {/* Count row */}
-      <div className="flex items-center justify-between mb-2 text-sm text-gray-500">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm text-gray-500">
         <span>
           Showing <strong>{items.length}</strong> of <strong>{total}</strong>
         </span>
       </div>
 
       {/* Table */}
-      <div className="card overflow-x-auto">
-        <table className="data-table text-xs" style={{ tableLayout: 'fixed', minWidth: Object.values(colWidths).reduce((a, b) => a + b, 0) }}>
+      <div className="card -mx-4 overflow-x-auto sm:mx-0">
+        <table className="data-table min-w-[600px] text-xs" style={{ tableLayout: 'fixed', minWidth: Math.max(600, Object.values(colWidths).reduce((a, b) => a + b, 0)) }}>
           <colgroup>
             {(Object.keys(MIN_COL_WIDTHS) as ColKey[]).map(k => (
               <col key={k} style={{ width: colWidths[k] }} />

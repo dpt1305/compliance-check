@@ -43,9 +43,9 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
-      <div className="card w-full max-w-sm">
-        <div className="flex items-center gap-3 p-5 border-b border-gray-100">
+    <div className="flex min-h-screen items-center justify-center bg-gray-100 p-4">
+      <div className="card mx-auto w-full max-w-sm overflow-hidden">
+        <div className="flex items-center gap-3 border-b border-gray-100 p-6 sm:p-8">
           <span className="text-2xl">🔐</span>
           <div>
             <h1 className="text-lg font-semibold text-gray-900">Admin Login</h1>
@@ -53,11 +53,11 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-4" noValidate>
+        <form onSubmit={handleSubmit} className="space-y-4 p-6 sm:p-8" noValidate>
           <div className="form-field">
             <label className="form-label">Username</label>
             <input
-              className="form-input"
+              className="form-input w-full"
               value={username}
               onChange={e => setUsername(e.target.value)}
               autoComplete="username"
@@ -69,7 +69,7 @@ export default function LoginPage() {
             <label className="form-label">Password</label>
             <div className="relative">
               <input
-                className="form-input pr-10"
+                className="form-input w-full pr-10"
                 type={showPw ? 'text' : 'password'}
                 value={password}
                 onChange={e => setPassword(e.target.value)}
@@ -106,7 +106,7 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <div className="px-5 pb-4">
+        <div className="px-6 pb-6 sm:px-8 sm:pb-8">
           <Link href="/dashboard" className="text-sm text-primary-600 hover:text-primary-800 flex items-center gap-1">
             ← Back to User Dashboard
           </Link>

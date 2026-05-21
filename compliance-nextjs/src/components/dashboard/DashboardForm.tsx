@@ -217,7 +217,7 @@ export default function DashboardForm() {
   const formInvalid = !!accountError || !submissionType || !file || !!fileError || fileValidating;
 
   return (
-    <div className="max-w-5xl mx-auto p-6">
+    <div className="max-w-5xl mx-auto py-6 px-3 sm:px-6">
       {/* Toast */}
       {toast && (
         <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded shadow-lg text-sm font-medium transition-all ${toast.ok ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
@@ -231,28 +231,28 @@ export default function DashboardForm() {
           href="/user-guide.html"
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-3 px-5 py-3 bg-gradient-to-r from-indigo-600 to-violet-600
+          className="flex flex-wrap items-center gap-3 px-4 sm:px-5 py-3 bg-gradient-to-r from-indigo-600 to-violet-600
                      text-white text-sm font-medium hover:from-indigo-500 hover:to-violet-500 transition-all
                      group border-b border-indigo-700"
         >
-          <span className="text-lg animate-bounce inline-block">📖</span>
-          <div className="flex-1">
+          <span className="text-lg animate-bounce inline-block shrink-0">📖</span>
+          <div className="min-w-0 flex-1">
             <span className="font-bold">New here? Read the User Guide first</span>
             <span className="ml-2 opacity-80 text-xs hidden sm:inline">— see exactly what screenshot you need to submit</span>
           </div>
-          <span className="inline-flex items-center gap-1 text-xs bg-white/20 hover:bg-white/30 px-3 py-1.5
+          <span className="inline-flex shrink-0 items-center gap-1 text-xs bg-white/20 hover:bg-white/30 px-3 py-1.5
                            rounded-full font-semibold transition-colors group-hover:bg-white/30 whitespace-nowrap">
             Open Guide →
           </span>
         </a>
 
-        <div className="flex items-center gap-3 p-5 border-b border-gray-100">
+        <div className="flex flex-wrap items-center gap-3 p-5 border-b border-gray-100">
           <span className="text-2xl">📋</span>
           <div className="flex-1">
             <h1 className="text-lg font-semibold text-gray-900">Submit Compliance Document</h1>
             <p className="text-sm text-gray-500">Upload your device image for AI validation</p>
           </div>
-          <Link href="/admin/login" className="text-sm text-primary-600 hover:text-primary-800 flex items-center gap-1">
+          <Link href="/admin/login" className="flex shrink-0 items-center gap-1 text-sm text-primary-600 hover:text-primary-800">
             <span>🔐</span> Admin
           </Link>
         </div>
@@ -298,8 +298,7 @@ export default function DashboardForm() {
                 <iframe
                   srcDoc={sampleImageSrcdoc(TYPE_SAMPLE_IMAGES[submissionType.toLowerCase()])}
                   title={`${submissionType} sample`}
-                  className="w-full"
-                  style={{ height: '480px', border: 'none' }}
+                  className="h-64 w-full border-0 sm:h-80 md:h-96"
                 />
                 <p className="text-xs text-gray-500 py-1.5 text-center border-t border-gray-200">
                   Example of a valid <span className="font-semibold capitalize">{submissionType}</span> submission — scroll or pinch to zoom
@@ -332,7 +331,7 @@ export default function DashboardForm() {
                 const f = e.dataTransfer.files?.[0];
                 if (f) await applyFile(f);
               }}
-              className={`flex flex-col items-center justify-center gap-3 w-full rounded-xl border-2 border-dashed cursor-pointer transition-colors px-6 py-8
+              className={`flex min-h-[120px] w-full cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed px-4 py-6 text-center transition-colors sm:px-6 sm:py-8
                 ${isDragging
                   ? 'border-primary-500 bg-primary-50'
                   : fileTouched && fileError
@@ -380,14 +379,14 @@ export default function DashboardForm() {
               ) : (
                 <>
                   <span className="text-4xl">{isDragging ? '📂' : '☁️'}</span>
-                  <div className="text-center space-y-1">
-                    <p className="text-sm font-semibold text-gray-700">
-                      {isDragging ? 'Drop image here' : 'Click to browse or drag & drop'}
+                  <div className="space-y-1 text-center">
+                    <p className="text-sm font-semibold text-gray-700 sm:text-base">
+                      {isDragging ? 'Drop image here' : 'Click, drag & drop, or paste'}
                     </p>
-                    <p className="text-xs text-gray-500">
-                      Or press <kbd className="px-1.5 py-0.5 rounded border border-gray-300 bg-white text-gray-600 font-mono text-xs">Ctrl+V</kbd> to paste from clipboard
+                    <p className="text-xs text-gray-500 sm:text-sm">
+                      Tap to browse, or press <kbd className="px-1.5 py-0.5 rounded border border-gray-300 bg-white text-gray-600 font-mono text-xs">Ctrl+V</kbd> to paste from clipboard
                     </p>
-                    <p className="text-xs text-gray-400">JPG, PNG, WEBP — max 10 MB</p>
+                    <p className="text-xs text-gray-400 sm:text-sm">JPG, PNG, WEBP — max 10 MB</p>
                   </div>
                 </>
               )}
@@ -418,10 +417,10 @@ export default function DashboardForm() {
           </div>
 
           {/* Submit */}
-          <div className="flex justify-end pt-2">
+          <div className="flex flex-wrap justify-end gap-2 pt-2">
             <button
               type="submit"
-              className="btn-primary"
+              className="btn-primary w-full sm:w-auto"
               disabled={formInvalid || isSubmitting}
             >
               {isSubmitting ? (
