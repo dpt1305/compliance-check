@@ -87,6 +87,21 @@ function AdminShell({ children }: { children: React.ReactNode }) {
           <span className="font-semibold text-lg">Compliance Admin</span>
           <div className="flex-1" />
           <span className="text-sm opacity-80 mr-2">{username}</span>
+
+          {/* Admin Guide button — prominent, pulsing amber */}
+          <a
+            href="/admin-guide.html"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open Admin Guide"
+            className="relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold
+                       bg-amber-400 text-amber-900 hover:bg-amber-300 transition-colors shadow-md
+                       ring-2 ring-amber-300/60 hover:ring-amber-200"
+          >
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-300 opacity-40 pointer-events-none" />
+            <span className="relative flex items-center gap-1.5">📖 Guide</span>
+          </a>
+
           <button onClick={exportExcel} disabled={isExporting} className="btn-icon text-white hover:bg-white/20" title="Export to Excel">
             {isExporting ? <span className="spinner w-4 h-4 border-white border-t-transparent"></span> : '📥'}
           </button>
