@@ -226,6 +226,26 @@ export default function DashboardForm() {
       )}
 
       <div className="card">
+        {/* Guide banner — eye-catching, shown at the very top of the card */}
+        <a
+          href="/user-guide.html"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-3 px-5 py-3 bg-gradient-to-r from-indigo-600 to-violet-600
+                     text-white text-sm font-medium hover:from-indigo-500 hover:to-violet-500 transition-all
+                     group border-b border-indigo-700"
+        >
+          <span className="text-lg animate-bounce inline-block">📖</span>
+          <div className="flex-1">
+            <span className="font-bold">New here? Read the User Guide first</span>
+            <span className="ml-2 opacity-80 text-xs hidden sm:inline">— see exactly what screenshot you need to submit</span>
+          </div>
+          <span className="inline-flex items-center gap-1 text-xs bg-white/20 hover:bg-white/30 px-3 py-1.5
+                           rounded-full font-semibold transition-colors group-hover:bg-white/30 whitespace-nowrap">
+            Open Guide →
+          </span>
+        </a>
+
         <div className="flex items-center gap-3 p-5 border-b border-gray-100">
           <span className="text-2xl">📋</span>
           <div className="flex-1">
