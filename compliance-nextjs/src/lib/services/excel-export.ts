@@ -1,8 +1,25 @@
-import { readAll } from '../db/tracking-repo';
+import { findAll } from '../db/submission-repo';
+import { readAll, matchesTrackingRow, type TrackingMember } from '../db/tracking-repo';
 import ExcelJS from 'exceljs';
 
-export async function generateReport(): Promise<Buffer> {
-  const members = await readAll();
+function compareValues(a: string | number, b: string | number, sortDir: 'asc' | 'desc') {
+  let cmp = 0;
+  if (typeof a === 'number' && typeof b === 'number') {
+    cmp = a - b;
+  } else {
+    cmp = String(a).localeCompare(String(b), undefined, { sensitivity: 'base', numeric: true });
+  }
+  return sortDir === 'asc' ? cmp : -cmp;
+}
+
+function bestSubmissionFor(member: TrackingMember, submissions: Awaited<ReturnType<typeof findAll>>) {
+  const matches = submissions.filter(s => matchesTrackingRow(member, s.deviceSerial, s.deviceName, s.account));
+  if (matches.length === 0) return null;
+  return matches.sort((a, b) => new Date(b.submissionDate).getTime() - new Date(a.submissionDate).getTime())[0];
+}
+
+export async function generateReport(sortCol = 'name', sortDir: 'asc' | 'desc' = 'asc'): Promise<Buffer> {
+  const [members, submissions] = await Promise.all([readAll(), findAll()]);
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('Compliance');
 
@@ -39,7 +56,69 @@ export async function generateReport(): Promise<Buffer> {
 
   // Data rows — skip removed members
   const active = members.filter(m => !m.removedFromTracking);
-  active.forEach((m, index) => {
+  const sortable = active.map(member => ({ member, submission: bestSubmissionFor(member, submissions) }));
+
+  sortable.sort((a, b) => {
+    let va: string | number = '';
+    let vb: string | number = '';
+    switch (sortCol) {
+      case 'project':
+        va = a.member.project ?? '';
+        vb = b.member.project ?? '';
+        break;
+      case 'name':
+        va = a.member.name ?? '';
+        vb = b.member.name ?? '';
+        break;
+      case 'account':
+        va = a.member.account ?? '';
+        vb = b.member.account ?? '';
+        break;
+      case 'email':
+        va = a.member.email ?? '';
+        vb = b.member.email ?? '';
+        break;
+      case 'serial':
+        va = a.member.serial ?? '';
+        vb = b.member.serial ?? '';
+        break;
+      case 'type':
+        va = a.member.deviceType ?? a.submission?.submissionType ?? '';
+        vb = b.member.deviceType ?? b.submission?.submissionType ?? '';
+        break;
+      case 'status':
+        va = a.submission?.status ?? 'NOT_SUBMITTED';
+        vb = b.submission?.status ?? 'NOT_SUBMITTED';
+        break;
+      case 'malwareAlerts':
+        va = a.member.malwareAlerts ?? '';
+        vb = b.member.malwareAlerts ?? '';
+        break;
+      case 'complianceChecks':
+        va = a.member.complianceChecks ?? '';
+        vb = b.member.complianceChecks ?? '';
+        break;
+      case 'seedConfig':
+        va = a.member.seedConfiguration ?? '';
+        vb = b.member.seedConfiguration ?? '';
+        break;
+      case 'os':
+        va = a.member.operatingSystem ?? '';
+        vb = b.member.operatingSystem ?? '';
+        break;
+      case 'submitted':
+        va = new Date(a.submission?.submissionDate ?? 0).getTime();
+        vb = new Date(b.submission?.submissionDate ?? 0).getTime();
+        break;
+      default:
+        va = a.member.name ?? '';
+        vb = b.member.name ?? '';
+        break;
+    }
+    return compareValues(va, vb, sortDir);
+  });
+
+  sortable.forEach(({ member: m }, index) => {
     const row = sheet.addRow({
       no:                m.no ?? (index + 1),
       project:           m.project ?? '',
