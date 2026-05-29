@@ -1,4 +1,5 @@
 import path from 'path';
+import type Database from 'better-sqlite3';
 import * as schema from './schema';
 
 function dbPath(): string {
