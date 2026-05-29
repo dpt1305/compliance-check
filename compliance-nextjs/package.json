@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build && cp -r .next/static .next/standalone/.next/static && (cp -r public .next/standalone/public 2>/dev/null || mkdir -p .next/standalone/public)",
-    "start": "node .next/standalone/server.js",
+    "build": "next build",
+    "start": "next start",
     "start:dev": "next start",
     "lint": "next lint"
   },
@@ -25,7 +25,7 @@
     "react-dom": "^18"
   },
   "engines": {
-    "node": ">=24.0.0"
+    "node": ">=20.0.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
