@@ -1,6 +1,4 @@
 import path from 'path';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from './schema';
 
 function dbPath(): string {
@@ -9,6 +7,12 @@ function dbPath(): string {
 }
 
 function createDb() {
+  // Lazy requires — avoids bundling/loading the native module on Vercel (MongoDB path)
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const Database = require('better-sqlite3') as typeof import('better-sqlite3');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { drizzle } = require('drizzle-orm/better-sqlite3') as typeof import('drizzle-orm/better-sqlite3');
+
   const filePath = dbPath();
 
   // Ensure data dir exists
@@ -132,8 +136,11 @@ function createDb() {
 // Singleton — always reuse across module reloads (both dev and production)
 const globalForDb = globalThis as unknown as { _db?: ReturnType<typeof createDb> };
 
-export const db = globalForDb._db ?? createDb();
-globalForDb._db = db;
+// Skip SQLite entirely when MongoDB is active (avoids native module errors on Vercel)
+const _mongoEnabled = !!process.env.MONGODB_URI;
+export const db = _mongoEnabled
+  ? (null as unknown as ReturnType<typeof createDb>)
+  : (globalForDb._db ?? (globalForDb._db = createDb()));
 
 /** Increment tracking_version in _meta and return new value. */
 export function bumpTrackingVersion(): number {
