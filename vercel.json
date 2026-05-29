@@ -1,0 +1,8 @@
+{
+  "rootDirectory": "compliance-nextjs",
+  "framework": "nextjs",
+  "nodeVersion": "22.x",
+  "buildCommand": "npm run build",
+  "installCommand": "npm install",
+  "outputDirectory": ".next"
+}
