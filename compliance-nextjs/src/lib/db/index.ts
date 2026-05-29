@@ -86,11 +86,14 @@ function createDb() {
     );
 
     CREATE TABLE IF NOT EXISTS admins (
-      id       TEXT PRIMARY KEY,
-      username TEXT NOT NULL UNIQUE,
-      password TEXT NOT NULL,
-      email    TEXT,
-      active   INTEGER NOT NULL DEFAULT 1
+      id                   TEXT PRIMARY KEY,
+      username             TEXT NOT NULL UNIQUE,
+      password             TEXT NOT NULL,
+      email                TEXT,
+      active               INTEGER NOT NULL DEFAULT 1,
+      role                 TEXT NOT NULL DEFAULT 'Admin',
+      teams                TEXT NOT NULL DEFAULT '[]',
+      must_change_password INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS _meta (
@@ -119,6 +122,9 @@ function createDb() {
 
   // Idempotent column additions for schema evolution (ALTER TABLE IF NOT EXISTS not available in older SQLite)
   try { sqlite.exec(`ALTER TABLE tracking_members ADD COLUMN removed_from_tracking INTEGER NOT NULL DEFAULT 0`); } catch { /* column already exists */ }
+  try { sqlite.exec(`ALTER TABLE admins ADD COLUMN role TEXT NOT NULL DEFAULT 'Admin'`); } catch { /* column already exists */ }
+  try { sqlite.exec(`ALTER TABLE admins ADD COLUMN teams TEXT NOT NULL DEFAULT '[]'`); } catch { /* column already exists */ }
+  try { sqlite.exec(`ALTER TABLE admins ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0`); } catch { /* column already exists */ }
 
   return db;
 }

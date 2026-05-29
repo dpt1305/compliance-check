@@ -67,11 +67,14 @@ export const submissions = sqliteTable('submissions', {
 
 // ── Admins (replaces admins.json) ─────────────────────────────────────────
 export const admins = sqliteTable('admins', {
-  id:       text('id').primaryKey(),
-  username: text('username').notNull().unique(),
-  password: text('password').notNull(),
-  email:    text('email'),
-  active:   integer('active', { mode: 'boolean' }).notNull().default(true),
+  id:                 text('id').primaryKey(),
+  username:           text('username').notNull().unique(),
+  password:           text('password').notNull(),
+  email:              text('email'),
+  active:             integer('active', { mode: 'boolean' }).notNull().default(true),
+  role:               text('role').notNull().default('Admin'),
+  teams:              text('teams').notNull().default('[]'),
+  mustChangePassword: integer('must_change_password', { mode: 'boolean' }).notNull().default(false),
 });
 
 // ── Attendance (from external attendance system) ──────────────────────────
