@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import MultiSelectDropdown from './MultiSelectDropdown';
 import { useAdminEvents } from '@/hooks/useAdminEvents';
 
@@ -149,6 +149,33 @@ function formatDate(d: string | undefined) {
   return d ? new Date(d).toLocaleString() : '';
 }
 
+function sortValue(row: UserListEntry, col: string): string {
+  switch (col) {
+    case 'project': return row.project ?? '';
+    case 'name': return row.name ?? '';
+    case 'account': return (row.trackingAccount ?? row.account ?? '').toLowerCase();
+    case 'email': return row.email ?? '';
+    case 'serial': return row.serial ?? '';
+    case 'type': return row.deviceType ?? row.submissionType ?? '';
+    case 'status': return row.submissionStatus ?? '';
+    case 'malwareAlerts': return row.malwareAlerts ?? '';
+    case 'complianceChecks': return row.complianceChecks ?? '';
+    case 'seedConfig': return row.seedConfiguration ?? '';
+    case 'os': return row.operatingSystem ?? '';
+    case 'submitted': return row.submissionDate ?? '';
+    default: return '';
+  }
+}
+
+function compareUserListRows(rowA: UserListEntry, rowB: UserListEntry, sortCol: string, sortDir: 'asc' | 'desc') {
+  const va = sortValue(rowA, sortCol);
+  const vb = sortValue(rowB, sortCol);
+  const cmp = sortCol === 'submitted'
+    ? (new Date(va || 0).getTime() - new Date(vb || 0).getTime())
+    : va.localeCompare(vb, undefined, { sensitivity: 'base', numeric: true });
+  return sortDir === 'asc' ? cmp : -cmp;
+}
+
 export default function UserList() {
   const [items, setItems] = useState<UserListEntry[]>([]);
   const [total, setTotal] = useState(0);
@@ -156,6 +183,7 @@ export default function UserList() {
   const [availableProjects, setAvailableProjects] = useState<string[]>([]);
   const [isFetchingMore, setIsFetchingMore] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isTeamlead, setIsTeamlead] = useState(false);
 
   // Tag-based search filter
   const [filterTags,   setFilterTags]   = useState<string[]>([]);
@@ -165,6 +193,8 @@ export default function UserList() {
   const { month: nowMonth, year: nowYear } = gmt7Now();
   const [filterMonth,  setFilterMonth]  = useState(String(nowMonth));
   const [filterYear,   setFilterYear]   = useState(String(nowYear));
+  const [sortCol, setSortCol] = useState<string>('name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
   // Image viewer modal (opened by clicking a thumbnail)
   const [editRow, setEditRow] = useState<UserListEntry | null>(null);
@@ -195,6 +225,10 @@ export default function UserList() {
     account: '',
     deviceType: '',
   });
+
+  useEffect(() => {
+    setIsTeamlead(sessionStorage.getItem('admin_role') === 'Teamlead');
+  }, []);
 
   // Column resize — global mouse tracking
   useEffect(() => {
@@ -275,6 +309,22 @@ export default function UserList() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterProjects, filterMonth, filterYear, filterTags]);
 
+  useEffect(() => {
+    sessionStorage.setItem('ul_sort_col', sortCol);
+    sessionStorage.setItem('ul_sort_dir', sortDir);
+  }, [sortCol, sortDir]);
+
+  const sortedItems = useMemo(() => [...items].sort((a, b) => compareUserListRows(a, b, sortCol, sortDir)), [items, sortCol, sortDir]);
+
+  function handleSort(col: string) {
+    if (sortCol === col) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortCol(col);
+      setSortDir('asc');
+    }
+  }
+
   // Real-time updates via SSE — instantly reloads when tracking or submissions change.
   useAdminEvents({ onTracking: loadData, onSubmissions: loadData });
 
@@ -300,7 +350,7 @@ export default function UserList() {
 
   // ── Review modal ─────────────────────────────────────────────────────────────
   /** Items that have an actual submission (submissionId defined) */
-  const reviewItems = items.filter(r => r.submissionId !== undefined);
+  const reviewItems = sortedItems.filter(r => r.submissionId !== undefined);
 
   function openReview(row: UserListEntry) {
     const idx = reviewItems.findIndex(r => r.submissionId === row.submissionId);
@@ -457,11 +507,11 @@ export default function UserList() {
   /** Returns a double-click-to-edit table cell — called as a function, NOT used as <Component> to avoid remount */
   function renderCell(row: UserListEntry, field: string, value: string, className = '') {
     const active = editCell?.row === row && editCell?.field === field;
-    const canEdit = TRACKING_FIELDS.has(field) || SEED_FIELDS.has(field) ? !!row.trackingRowNum : false;
+    const canEdit = !isTeamlead && (TRACKING_FIELDS.has(field) || SEED_FIELDS.has(field) ? !!row.trackingRowNum : false);
 
     if (active) {
       return (
-        <td key={field} className={`${className} p-0 align-top`} style={{ minWidth: 90 }}>
+        <td key={field} className={`${className} p-0 align-top border-r border-gray-200`} style={{ minWidth: 90 }}>
           <div className="flex flex-col gap-1 p-1">
             <input
               className="form-input text-xs py-0.5 px-1 w-full"
@@ -491,7 +541,7 @@ export default function UserList() {
     return (
       <td
         key={field}
-        className={`${className} ${canEdit ? 'cursor-pointer hover:bg-indigo-50 group' : ''}`}
+        className={`${className} border-r border-gray-200 ${canEdit ? 'cursor-pointer hover:bg-indigo-50 group' : ''}`}
         onDoubleClick={canEdit ? (e) => { e.stopPropagation(); startCellEdit(row, field, value); } : undefined}
         title={canEdit ? 'Double-click to edit' : undefined}
       >
@@ -635,7 +685,8 @@ export default function UserList() {
       const allRes = await fetch(`/api/admin/user-list?${allParams}`, { headers: authHeaders() });
       if (!allRes.ok) { showToast('Failed to fetch filter data', false); return; }
       const allData = await allRes.json() as { items: UserListEntry[] };
-      const members = allData.items.map((row, idx) => ({
+      const sortedAll = [...allData.items].sort((a, b) => compareUserListRows(a, b, sortCol, sortDir));
+      const members = sortedAll.map((row, idx) => ({
         no: idx + 1,
         name: row.name,
         trackingRowNum: row.trackingRowNum,
@@ -931,7 +982,7 @@ export default function UserList() {
                         const num = display !== null ? parseInt(display, 10) : NaN;
                         const isZero   = !isNaN(num) && num === 0;
                         const hasIssue = !isNaN(num) && num > 0;
-                        const canEdit  = !!row.trackingRowNum;
+                        const canEdit  = !isTeamlead && !!row.trackingRowNum;
                         return (
                           <div
                             key={field}
@@ -1064,29 +1115,31 @@ export default function UserList() {
                   <span>·</span>
                   <span>Esc close</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    disabled={isReviewSaving || currentStatus === 'PENDING'}
-                    onClick={() => reviewChangeStatus('PENDING')}
-                    className="px-3 py-1.5 rounded text-xs font-semibold border border-yellow-300 bg-yellow-50 text-yellow-700 hover:bg-yellow-100 disabled:opacity-40 disabled:cursor-not-allowed transition"
-                  >
-                    {isReviewSaving ? <span className="spinner w-3 h-3 border-yellow-400 border-t-transparent inline-block" /> : '⏸ Pending'}
-                  </button>
-                  <button
-                    disabled={isReviewSaving || currentStatus === 'REJECTED'}
-                    onClick={() => reviewChangeStatus('REJECTED')}
-                    className="px-3 py-1.5 rounded text-xs font-semibold border border-red-300 bg-red-50 text-red-700 hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed transition"
-                  >
-                    {isReviewSaving ? <span className="spinner w-3 h-3 border-red-400 border-t-transparent inline-block" /> : '✕ Reject'}
-                  </button>
-                  <button
-                    disabled={isReviewSaving || currentStatus === 'APPROVED'}
-                    onClick={() => reviewChangeStatus('APPROVED')}
-                    className="px-4 py-1.5 rounded text-xs font-semibold bg-green-600 text-white hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed transition"
-                  >
-                    {isReviewSaving ? <span className="spinner w-3 h-3 border-white border-t-transparent inline-block" /> : '✓ Approve'}
-                  </button>
-                </div>
+                {!isTeamlead && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      disabled={isReviewSaving || currentStatus === 'PENDING'}
+                      onClick={() => reviewChangeStatus('PENDING')}
+                      className="px-3 py-1.5 rounded text-xs font-semibold border border-yellow-300 bg-yellow-50 text-yellow-700 hover:bg-yellow-100 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                    >
+                      {isReviewSaving ? <span className="spinner w-3 h-3 border-yellow-400 border-t-transparent inline-block" /> : '⏸ Pending'}
+                    </button>
+                    <button
+                      disabled={isReviewSaving || currentStatus === 'REJECTED'}
+                      onClick={() => reviewChangeStatus('REJECTED')}
+                      className="px-3 py-1.5 rounded text-xs font-semibold border border-red-300 bg-red-50 text-red-700 hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                    >
+                      {isReviewSaving ? <span className="spinner w-3 h-3 border-red-400 border-t-transparent inline-block" /> : '✕ Reject'}
+                    </button>
+                    <button
+                      disabled={isReviewSaving || currentStatus === 'APPROVED'}
+                      onClick={() => reviewChangeStatus('APPROVED')}
+                      className="px-4 py-1.5 rounded text-xs font-semibold bg-green-600 text-white hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                    >
+                      {isReviewSaving ? <span className="spinner w-3 h-3 border-white border-t-transparent inline-block" /> : '✓ Approve'}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1175,24 +1228,28 @@ export default function UserList() {
 
       {/* Toolbar row 2: actions */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
-        <button
-          onClick={openAddMember}
-          className="btn-primary flex items-center gap-1.5 text-sm"
-          title="Add new member to tracking.xlsx"
-        >
-          ➕ Add Member
-        </button>
-        <input ref={uploadRef} type="file" accept=".xlsx" className="hidden" onChange={handleUpload} />
-        <button
-          onClick={() => uploadRef.current?.click()}
-          disabled={isUploading}
-          className="btn-secondary flex items-center gap-1.5 text-sm"
-          title="Upload new tracking.xlsx to replace server file"
-        >
-          {isUploading
-            ? <><span className="spinner w-4 h-4 border-gray-400 border-t-transparent"></span> Uploading…</>
-            : <>📤 Upload Tracking</>}
-        </button>
+        {!isTeamlead && (
+          <>
+            <button
+              onClick={openAddMember}
+              className="btn-primary flex items-center gap-1.5 text-sm"
+              title="Add new member to tracking.xlsx"
+            >
+              ➕ Add Member
+            </button>
+            <input ref={uploadRef} type="file" accept=".xlsx" className="hidden" onChange={handleUpload} />
+            <button
+              onClick={() => uploadRef.current?.click()}
+              disabled={isUploading}
+              className="btn-secondary flex items-center gap-1.5 text-sm"
+              title="Upload new tracking.xlsx to replace server file"
+            >
+              {isUploading
+                ? <><span className="spinner w-4 h-4 border-gray-400 border-t-transparent"></span> Uploading…</>
+                : <>📤 Upload Tracking</>}
+            </button>
+          </>
+        )}
         <button
           onClick={handleDownload}
           disabled={isDownloading}
@@ -1210,7 +1267,7 @@ export default function UserList() {
               : <>📥 Download Tracking</>}
         </button>
         {/* Clear period — only shown when month+year filter is active */}
-        {filterMonth && filterYear && (
+        {filterMonth && filterYear && !isTeamlead && (
           <button
             onClick={handleClearPeriod}
             disabled={isClearing}
@@ -1222,15 +1279,22 @@ export default function UserList() {
               : <>🗑️ Clear {MONTH_NAMES[parseInt(filterMonth) - 1]} {filterYear}</>}
           </button>
         )}
+        {isTeamlead && (
+          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
+            👁️ View only
+          </span>
+        )}
         <div className="flex-1" />
-        <button
-          onClick={() => { if (reviewItems.length > 0) setReviewIdx(0); }}
-          disabled={reviewItems.length === 0}
-          className="btn-secondary flex items-center gap-1.5 text-sm"
-          title={reviewItems.length > 0 ? `Review ${reviewItems.length} submission(s)` : 'No submissions to review'}
-        >
-          🔍 Review {reviewItems.length > 0 ? `(${reviewItems.length})` : ''}
-        </button>
+        {!isTeamlead && (
+          <button
+            onClick={() => { if (reviewItems.length > 0) setReviewIdx(0); }}
+            disabled={reviewItems.length === 0}
+            className="btn-secondary flex items-center gap-1.5 text-sm"
+            title={reviewItems.length > 0 ? `Review ${reviewItems.length} submission(s)` : 'No submissions to review'}
+          >
+            🔍 Review {reviewItems.length > 0 ? `(${reviewItems.length})` : ''}
+          </button>
+        )}
         <button onClick={loadData} disabled={isLoading} className="btn-secondary" title="Refresh">
           {isLoading ? <span className="spinner w-4 h-4 border-gray-400 border-t-transparent"></span> : '🔄'}
         </button>
@@ -1253,23 +1317,43 @@ export default function UserList() {
           </colgroup>
           <thead>
             <tr>
-              {(Object.keys(COL_HEADERS) as ColKey[]).map(col => (
-                <th key={col} className="relative select-none whitespace-nowrap overflow-hidden" style={{ width: colWidths[col] }}>
-                  <span className="block truncate pr-2">{COL_HEADERS[col]}</span>
-                  {/* Resize handle */}
-                  <span
-                    className="absolute top-0 right-0 h-full w-2 cursor-col-resize hover:bg-indigo-300/40"
-                    onMouseDown={e => {
-                      e.preventDefault();
-                      resizeRef.current = { col, startX: e.clientX, startW: colWidths[col] };
-                    }}
-                  />
-                </th>
-              ))}
+              {(Object.keys(COL_HEADERS) as ColKey[]).map(col => {
+                const isSortable = !['no', 'image', 'actions'].includes(col);
+                const isActive = sortCol === col;
+                return (
+                  <th key={col} className="relative select-none whitespace-nowrap overflow-hidden border-r border-gray-200 last:border-r-0" style={{ width: colWidths[col] }}>
+                    <div className="flex items-center gap-1 pr-4 overflow-hidden">
+                      {isSortable ? (
+                        <button
+                          type="button"
+                          className={`flex items-center gap-1 truncate text-left hover:text-indigo-600 transition-colors ${isActive ? 'text-indigo-700 font-bold' : ''}`}
+                          onClick={() => handleSort(col)}
+                          title={`Sort by ${COL_HEADERS[col]}`}
+                        >
+                          <span className="truncate">{COL_HEADERS[col]}</span>
+                          <span className="shrink-0 text-xs">
+                            {isActive ? (sortDir === 'asc' ? '▲' : '▼') : <span className="text-gray-300">↕</span>}
+                          </span>
+                        </button>
+                      ) : (
+                        <span className="block truncate">{COL_HEADERS[col]}</span>
+                      )}
+                    </div>
+                    {/* Resize handle */}
+                    <span
+                      className="absolute top-0 right-0 h-full w-2 cursor-col-resize hover:bg-indigo-300/40"
+                      onMouseDown={e => {
+                        e.preventDefault();
+                        resizeRef.current = { col, startX: e.clientX, startW: colWidths[col] };
+                      }}
+                    />
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
-            {items.length === 0 ? (
+            {sortedItems.length === 0 ? (
               <tr>
                 <td colSpan={15} className="text-center text-gray-500 py-8">
                   {isLoading ? 'Loading…' : filterTags.length > 0 || filterProjects !== null || filterMonth || filterYear
@@ -1277,13 +1361,13 @@ export default function UserList() {
                     : 'No data found.'}
                 </td>
               </tr>
-            ) : items.map((row, idx) => (
+            ) : sortedItems.map((row, idx) => (
               <tr
                 key={row.submissionId ?? `tr-${row.trackingNo ?? idx}`}
                 className={!row.submissionStatus || row.submissionStatus === 'NOT_SUBMITTED' ? 'bg-red-50' : ''}
               >
                 {/* No. — not editable */}
-                <td className="text-gray-400 font-medium">{idx + 1}</td>
+                <td className="text-gray-400 font-medium border-r border-gray-200">{idx + 1}</td>
 
                 {/* Project */}
                 {renderCell(row, 'project', row.project ?? '', 'text-gray-500')}
@@ -1304,8 +1388,8 @@ export default function UserList() {
                 {renderCell(row, 'deviceType', row.deviceType ?? row.submissionType ?? '', 'capitalize')}
 
                 {/* Status — direct dropdown for submitted members; badge for unsubmitted */}
-                {row.submissionId ? (
-                  <td className="p-1">
+                {row.submissionId && !isTeamlead ? (
+                  <td className="p-1 border-r border-gray-200">
                     <select
                       className="form-select text-xs py-0.5 px-1 w-full"
                       value={row.submissionStatus ?? 'PENDING'}
@@ -1334,7 +1418,7 @@ export default function UserList() {
                     </select>
                   </td>
                 ) : (
-                  <td>
+                  <td className="border-r border-gray-200">
                     <span className={statusBadge(row.submissionStatus)}>{statusLabel(row.submissionStatus)}</span>
                   </td>
                 )}
@@ -1352,12 +1436,12 @@ export default function UserList() {
                 {renderCell(row, 'operatingSystem', numOnly(row.operatingSystem) ?? '')}
 
                 {/* Submitted — read-only */}
-                <td className="text-gray-400 whitespace-nowrap truncate">
+                <td className="text-gray-400 whitespace-nowrap truncate border-r border-gray-200">
                   {row.submissionDate ? formatDate(row.submissionDate) : <span className="text-red-400">—</span>}
                 </td>
 
                 {/* Image thumbnail */}
-                <td>
+                <td className="border-r border-gray-200">
                   {(() => {
                     const thumb = relativeImageUrl(row.imageUrl);
                     return thumb ? (
@@ -1380,14 +1464,16 @@ export default function UserList() {
 
                 {/* Actions */}
                 <td>
-                  <div className="flex gap-1">
-                    {row.trackingRowNum && (
-                      <button onClick={() => deleteMember(row)} className="btn-icon text-amber-700" title="Delete member">🧾</button>
-                    )}
-                    {row.submissionId && (
-                      <button onClick={() => deleteSubmission(row)} className="btn-icon text-red-600" title="Delete submission">🗑️</button>
-                    )}
-                  </div>
+                  {!isTeamlead && (
+                    <div className="flex gap-1">
+                      {row.trackingRowNum && (
+                        <button onClick={() => deleteMember(row)} className="btn-icon text-amber-700" title="Delete member">🧾</button>
+                      )}
+                      {row.submissionId && (
+                        <button onClick={() => deleteSubmission(row)} className="btn-icon text-red-600" title="Delete submission">🗑️</button>
+                      )}
+                    </div>
+                  )}
                 </td>
               </tr>
             ))}

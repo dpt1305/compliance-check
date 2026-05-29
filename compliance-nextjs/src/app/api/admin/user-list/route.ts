@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { COOKIE_NAME, extractBearerToken, verifyToken } from '@/lib/auth/jwt';
+import { findByUsername } from '@/lib/db/admin-repo';
 import { findAll } from '@/lib/db/submission-repo';
 import {
   readAll, readActive, insertMember, updateMember, deleteMember,
@@ -78,6 +80,26 @@ function applyPeriodMask(entry: UserListEntry, month: number, year: number): Use
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const sp = req.nextUrl.searchParams;
+
+  // Resolve caller's role and teams
+  const bearerToken = extractBearerToken(req.headers.get('authorization'));
+  const cookieToken = req.cookies.get(COOKIE_NAME)?.value ?? null;
+  const token = bearerToken ?? cookieToken;
+  const callerUsername = token ? await verifyToken(token) : null;
+  let callerRole = 'Admin';
+  let callerTeams: string[] = [];
+  if (callerUsername) {
+    const caller = await findByUsername(callerUsername);
+    if (caller) {
+      callerRole = caller.role ?? 'Admin';
+      try {
+        callerTeams = JSON.parse(caller.teams ?? '[]') as string[];
+      } catch {
+        callerTeams = [];
+      }
+    }
+  }
+
   const offset = Math.max(0, parseInt(sp.get('offset') ?? '0', 10) || 0);
   const limit  = Math.max(1, Math.min(99999, parseInt(sp.get('limit') ?? '50', 10) || 50));
   const projectsParam = sp.getAll('project');
@@ -244,6 +266,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         })
       )
     );
+  }
+
+  // Role-based filter: Teamlead can only see members in their teams
+  if (callerRole === 'Teamlead' && callerTeams.length > 0) {
+    result = result.filter(r => {
+      const proj = (r.project ?? '').trim().toLowerCase();
+      return callerTeams.some(t => t.trim().toLowerCase() === proj);
+    });
+  } else if (callerRole === 'Teamlead' && callerTeams.length === 0) {
+    result = [];
   }
 
   const total = result.length;
