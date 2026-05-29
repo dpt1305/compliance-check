@@ -9,7 +9,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   try {
     const body = await req.json() as { username?: string; password?: string };
-    const { username, password } = body;
+    const username = body.username?.trim();
+    const { password } = body;
 
     if (!username || !password) {
       return NextResponse.json({ message: 'Username and password are required' }, { status: 400 });
@@ -27,7 +28,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     const token = await generateToken(username);
 
-    const res = NextResponse.json({ token, type: 'Bearer', username });
+    const res = NextResponse.json({ token, type: 'Bearer', username, role: admin.role ?? 'Admin', mustChangePassword: admin.mustChangePassword ?? false });
 
     // Set HttpOnly cookie so session survives tab closes / page refreshes
     res.cookies.set(COOKIE_NAME, token, {
