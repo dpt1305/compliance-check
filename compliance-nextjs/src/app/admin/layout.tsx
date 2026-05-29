@@ -10,26 +10,39 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   const [username, setUsername] = useState('Admin');
   const [isExporting, setIsExporting] = useState(false);
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
+  const [showChangePw, setShowChangePw] = useState(false);
+  const [changePwFields, setChangePwFields] = useState({ current: '', newPw: '', confirm: '' });
+  const [changePwError, setChangePwError] = useState('');
+  const [isChangingPw, setIsChangingPw] = useState(false);
+  const [showCurrentPw, setShowCurrentPw] = useState(false);
+  const [showNewPw, setShowNewPw] = useState(false);
+  const [showConfirmPw, setShowConfirmPw] = useState(false);
 
   useEffect(() => {
     const stored = sessionStorage.getItem('admin_username');
-    if (stored) {
-      setUsername(stored);
-    } else {
-      // sessionStorage cleared (tab reopen) — restore username from cookie-backed /api/auth/me
-      fetch('/api/auth/me')
-        .then(r => r.ok ? r.json() : null)
-        .then((data: { username?: string; token?: string } | null) => {
-          if (data?.username) {
-            setUsername(data.username);
-            // Restore token to sessionStorage so existing fetch calls keep working
-            if (data.token) sessionStorage.setItem('admin_token', data.token);
-            sessionStorage.setItem('admin_username', data.username);
-          }
-        })
-        .catch(() => {});
-    }
-  }, []);
+
+    fetch('/api/auth/me')
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { username?: string; token?: string; role?: string; mustChangePassword?: boolean } | null) => {
+        if (data?.mustChangePassword) {
+          router.replace('/admin/change-password');
+          return;
+        }
+
+        if (stored) {
+          setUsername(stored);
+        } else if (data?.username) {
+          setUsername(data.username);
+        }
+
+        if (data?.token) sessionStorage.setItem('admin_token', data.token);
+        if (data?.username) sessionStorage.setItem('admin_username', data.username);
+        if (data?.role) sessionStorage.setItem('admin_role', data.role);
+      })
+      .catch(() => {
+        if (stored) setUsername(stored);
+      });
+  }, [router]);
 
   function getToken() { return sessionStorage.getItem('admin_token') ?? ''; }
 
@@ -41,7 +54,9 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   async function exportExcel() {
     setIsExporting(true);
     try {
-      const res = await fetch('/api/admin/export', {
+      const sortCol = sessionStorage.getItem('ul_sort_col') ?? 'name';
+      const sortDir = sessionStorage.getItem('ul_sort_dir') ?? 'asc';
+      const res = await fetch(`/api/admin/export?sortCol=${encodeURIComponent(sortCol)}&sortDir=${encodeURIComponent(sortDir)}`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (!res.ok) { showToast('Export failed', false); return; }
@@ -59,16 +74,63 @@ function AdminShell({ children }: { children: React.ReactNode }) {
     }
   }
 
+  async function handleChangePw(e: React.FormEvent) {
+    e.preventDefault();
+    setChangePwError('');
+
+    if (!changePwFields.current || !changePwFields.newPw || !changePwFields.confirm) {
+      setChangePwError('All fields are required');
+      return;
+    }
+    if (changePwFields.newPw.length < 8) {
+      setChangePwError('New password must be at least 8 characters');
+      return;
+    }
+    if (changePwFields.newPw === changePwFields.current) {
+      setChangePwError('New password must be different from current password');
+      return;
+    }
+    if (changePwFields.newPw !== changePwFields.confirm) {
+      setChangePwError('Passwords do not match');
+      return;
+    }
+
+    setIsChangingPw(true);
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ currentPassword: changePwFields.current, newPassword: changePwFields.newPw }),
+      });
+      const data = await res.json() as { message?: string };
+      if (!res.ok) {
+        setChangePwError(data.message ?? 'Failed to change password');
+        return;
+      }
+      setShowChangePw(false);
+      setChangePwFields({ current: '', newPw: '', confirm: '' });
+      setShowCurrentPw(false);
+      setShowNewPw(false);
+      setShowConfirmPw(false);
+      showToast('Password changed successfully', true);
+    } catch {
+      setChangePwError('Request failed. Please try again.');
+    } finally {
+      setIsChangingPw(false);
+    }
+  }
+
   function logout() {
     fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     sessionStorage.removeItem('admin_token');
     sessionStorage.removeItem('admin_username');
+    sessionStorage.removeItem('admin_role');
     router.push('/admin/login');
   }
 
   const navLinks = [
     { href: '/admin/user-list', label: 'User List', icon: '👥' },
-    { href: '/admin/checkin-table', label: 'Check-In Table', icon: '📊' },
+    { href: '/admin/account-management', label: 'Account Management', icon: '👤' },
     { href: '/admin/notifications', label: 'Notifications', icon: '🔔' },
   ];
 
@@ -80,6 +142,77 @@ function AdminShell({ children }: { children: React.ReactNode }) {
         </div>
       )}
 
+      {showChangePw && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => setShowChangePw(false)}>
+          <div className="bg-white rounded-lg shadow-2xl w-full max-w-sm" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+              <h2 className="font-semibold text-gray-900">🔑 Change Password</h2>
+              <button onClick={() => setShowChangePw(false)} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">×</button>
+            </div>
+            <form onSubmit={handleChangePw} className="p-5 space-y-4" noValidate>
+              <div className="form-field">
+                <label className="form-label">Current Password</label>
+                <div className="relative">
+                  <input
+                    className="form-input pr-10"
+                    type={showCurrentPw ? 'text' : 'password'}
+                    value={changePwFields.current}
+                    onChange={e => setChangePwFields(f => ({ ...f, current: e.target.value }))}
+                    autoComplete="current-password"
+                    required
+                  />
+                  <button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 text-sm" onClick={() => setShowCurrentPw(v => !v)} tabIndex={-1}>
+                    {showCurrentPw ? '🙈' : '👁️'}
+                  </button>
+                </div>
+              </div>
+              <div className="form-field">
+                <label className="form-label">New Password</label>
+                <div className="relative">
+                  <input
+                    className="form-input pr-10"
+                    type={showNewPw ? 'text' : 'password'}
+                    value={changePwFields.newPw}
+                    onChange={e => setChangePwFields(f => ({ ...f, newPw: e.target.value }))}
+                    autoComplete="new-password"
+                    required
+                  />
+                  <button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 text-sm" onClick={() => setShowNewPw(v => !v)} tabIndex={-1}>
+                    {showNewPw ? '🙈' : '👁️'}
+                  </button>
+                </div>
+              </div>
+              <div className="form-field">
+                <label className="form-label">Confirm New Password</label>
+                <div className="relative">
+                  <input
+                    className="form-input pr-10"
+                    type={showConfirmPw ? 'text' : 'password'}
+                    value={changePwFields.confirm}
+                    onChange={e => setChangePwFields(f => ({ ...f, confirm: e.target.value }))}
+                    autoComplete="new-password"
+                    required
+                  />
+                  <button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 text-sm" onClick={() => setShowConfirmPw(v => !v)} tabIndex={-1}>
+                    {showConfirmPw ? '🙈' : '👁️'}
+                  </button>
+                </div>
+              </div>
+              {changePwError && (
+                <div className="alert-error"><span>⚠️</span> {changePwError}</div>
+              )}
+              <div className="flex justify-end gap-2 pt-1">
+                <button type="button" onClick={() => setShowChangePw(false)} className="btn-secondary">Cancel</button>
+                <button type="submit" className="btn-primary flex items-center gap-2" disabled={isChangingPw}>
+                  {isChangingPw && <span className="spinner w-4 h-4 border-white border-t-transparent"></span>}
+                  Change Password
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Toolbar */}
       <header className="bg-primary-600 text-white shadow-md">
         <div className="flex items-center px-4 py-3 gap-3">
@@ -87,6 +220,20 @@ function AdminShell({ children }: { children: React.ReactNode }) {
           <span className="font-semibold text-lg">Compliance Admin</span>
           <div className="flex-1" />
           <span className="text-sm opacity-80 mr-2">{username}</span>
+          <button
+            onClick={() => {
+              setShowChangePw(true);
+              setChangePwError('');
+              setChangePwFields({ current: '', newPw: '', confirm: '' });
+              setShowCurrentPw(false);
+              setShowNewPw(false);
+              setShowConfirmPw(false);
+            }}
+            className="btn-icon text-white hover:bg-white/20"
+            title="Change Password"
+          >
+            🔑
+          </button>
 
           {/* Admin Guide button — prominent, pulsing amber */}
           <a
@@ -105,7 +252,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
           <button onClick={exportExcel} disabled={isExporting} className="btn-icon text-white hover:bg-white/20" title="Export to Excel">
             {isExporting ? <span className="spinner w-4 h-4 border-white border-t-transparent"></span> : '📥'}
           </button>
-          <Link href="/dashboard" className="btn-icon text-white hover:bg-white/20" title="User Dashboard">🏠</Link>
+          <Link href="/form" className="btn-icon text-white hover:bg-white/20" title="User Dashboard">🏠</Link>
           <button onClick={logout} className="btn-icon text-white hover:bg-white/20" title="Logout">🚪</button>
         </div>
 
@@ -137,8 +284,8 @@ function AdminShell({ children }: { children: React.ReactNode }) {
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
-  // Login page is public — render without shell, no auth check
-  if (pathname === '/admin/login') return <>{children}</>;
+  // Login and forced password change pages render without the admin shell
+  if (pathname === '/admin/login' || pathname === '/admin/change-password') return <>{children}</>;
 
   // All other admin pages are protected by middleware (cookie check).
   // AdminShell handles username restoration from cookie via /api/auth/me.
