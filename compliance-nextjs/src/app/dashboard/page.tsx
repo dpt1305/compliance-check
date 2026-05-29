@@ -1,7 +1,5 @@
-import DashboardForm from '@/components/dashboard/DashboardForm';
-
-export const metadata = { title: 'Submit Compliance | Compliance System' };
+import { redirect } from 'next/navigation';
 
 export default function DashboardPage() {
-  return <DashboardForm />;
+  redirect('/form');
 }

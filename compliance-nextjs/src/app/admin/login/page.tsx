@@ -22,9 +22,9 @@ export default function LoginPage() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username: username.trim(), password }),
       });
-      const data = await res.json() as { token?: string; username?: string; message?: string };
+      const data = await res.json() as { token?: string; username?: string; message?: string; role?: string; mustChangePassword?: boolean };
 
       if (!res.ok) {
         setError(data.message ?? 'Invalid username or password');
@@ -34,7 +34,12 @@ export default function LoginPage() {
 
       sessionStorage.setItem('admin_token', data.token!);
       sessionStorage.setItem('admin_username', data.username!);
-      router.push('/admin');
+      sessionStorage.setItem('admin_role', (data as { role?: string }).role ?? 'Admin');
+      if ((data as { mustChangePassword?: boolean }).mustChangePassword) {
+        router.push('/admin/change-password');
+      } else {
+        router.push('/admin');
+      }
     } catch {
       setError('Login failed. Please try again.');
     } finally {
@@ -48,7 +53,7 @@ export default function LoginPage() {
         <div className="flex items-center gap-3 p-5 border-b border-gray-100">
           <span className="text-2xl">🔐</span>
           <div>
-            <h1 className="text-lg font-semibold text-gray-900">Admin Login</h1>
+            <h1 className="text-lg font-semibold text-gray-900">Admin / Teamlead Login</h1>
             <p className="text-sm text-gray-500">Compliance Management System</p>
           </div>
         </div>
@@ -107,7 +112,7 @@ export default function LoginPage() {
         </form>
 
         <div className="px-5 pb-4">
-          <Link href="/dashboard" className="text-sm text-primary-600 hover:text-primary-800 flex items-center gap-1">
+          <Link href="/form" className="text-sm text-primary-600 hover:text-primary-800 flex items-center gap-1">
             ← Back to User Dashboard
           </Link>
         </div>
