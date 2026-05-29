@@ -1,6 +1,5 @@
 /**
  * MongoDB admin repository.
- * Mirrors the interface of src/lib/db/admin-repo.ts exactly so callers need no changes.
  */
 import bcrypt from 'bcryptjs';
 import { getMongoDb } from './connection';
@@ -24,9 +23,25 @@ export async function findByUsername(username: string): Promise<AdminUser | null
   const c = await col();
   const doc = await c.findOne({ username });
   if (!doc) return null;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { _id, ...rest } = doc;
-  return rest as AdminUser;
+  void _id;
+  return {
+    ...rest,
+    role: rest.role ?? 'Admin',
+    teams: rest.teams ?? '[]',
+    mustChangePassword: rest.mustChangePassword ?? false,
+  } as AdminUser;
+}
+
+export async function findAll(): Promise<AdminUser[]> {
+  const c = await col();
+  const docs = await c.find({}).toArray();
+  return docs.map(({ _id, ...rest }) => ({
+    ...rest,
+    role: rest.role ?? 'Admin',
+    teams: rest.teams ?? '[]',
+    mustChangePassword: rest.mustChangePassword ?? false,
+  } as AdminUser));
 }
 
 export async function saveAdmin(
@@ -34,19 +49,35 @@ export async function saveAdmin(
 ): Promise<AdminUser> {
   const c = await col();
   const id = admin.id ?? crypto.randomUUID();
+  const doc: AdminUser = {
+    id,
+    username: admin.username,
+    password: admin.password,
+    email: admin.email ?? '',
+    active: admin.active,
+    role: admin.role ?? 'Admin',
+    teams: admin.teams ?? '[]',
+    mustChangePassword: admin.mustChangePassword ?? false,
+  };
 
   if (admin.id) {
     const existing = await c.findOne({ id: admin.id });
     if (existing) {
-      const update = { username: admin.username, password: admin.password, email: admin.email, active: admin.active };
+      const { id: _id, ...update } = doc;
+      void _id;
       await c.updateOne({ id: admin.id }, { $set: update });
-      return { id: admin.id, ...update };
+      return doc;
     }
   }
 
-  const doc: AdminUser = { id, username: admin.username, password: admin.password, email: admin.email ?? '', active: admin.active };
   await c.insertOne(doc);
   return doc;
+}
+
+export async function deleteAdmin(id: string): Promise<boolean> {
+  const c = await col();
+  const result = await c.deleteOne({ id });
+  return result.deletedCount > 0;
 }
 
 export async function initDefaultAdmin(): Promise<void> {
@@ -54,10 +85,13 @@ export async function initDefaultAdmin(): Promise<void> {
   if (existing) return;
 
   await saveAdmin({
-    id:       crypto.randomUUID(),
-    username: 'admin',
-    email:    'admin@compliance.local',
-    password: bcrypt.hashSync('Admin@123', 10),
-    active:   true,
+    id:                 crypto.randomUUID(),
+    username:           'admin',
+    email:              'admin@compliance.local',
+    password:           bcrypt.hashSync('Admin@123', 10),
+    active:             true,
+    role:               'Admin',
+    teams:              '[]',
+    mustChangePassword: false,
   });
 }
