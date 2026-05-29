@@ -1,3 +1,50 @@
+# Compliance Management System
+
+A full-stack compliance tracking system built with **Next.js 14+**, **SQLite** (or MongoDB), and **AI-powered image validation**.
+
+## Features
+
+### User Portal (`/form`)
+- Submit compliance screenshots with account, device type selection
+- Real-time AI validation (Gemini / ChatGPT / NVIDIA with priority fallback)
+- Immediate feedback on submission status
+
+### Admin Panel (`/admin`)
+| Feature | Description |
+|---|---|
+| **User List** | Searchable table; sort any column A→Z/Z→A; inline edit; submission review modal; project filter; Excel export |
+| **Account Management** | Create/edit/delete admin & teamlead accounts; teams assignment via multi-select; default password `USERNAME@123` |
+| **Notifications** | Deadline reminders via Microsoft Teams webhook |
+
+### Roles & Access
+| Role | Access |
+|---|---|
+| **Admin** | Full access — all tabs, edit/delete anything, manage accounts |
+| **Teamlead** | View-only User List (only their teams' members); no Account Management write access |
+
+### Security
+- JWT authentication with 1-hour expiry
+- Force password change on first login (new accounts)
+- BCrypt password hashing
+- Rate limiting (optional, toggle via config)
+
+## Quick Start
+
+```bash
+cd compliance-nextjs
+npm install
+npm run dev
+# Open http://localhost:3000
+# Admin login: http://localhost:3000/admin/login
+# Default admin: admin / Admin@123
+```
+
+---
+
+*(EC2 deployment guide follows below)*
+
+---
+
 # EC2 Deployment Guide — PM2 + Nginx + Custom Domain
 
 Deploy the compliance app on an AWS EC2 t2.micro instance using PM2 (process manager) and Nginx (reverse proxy), accessible via your own domain with HTTPS.
