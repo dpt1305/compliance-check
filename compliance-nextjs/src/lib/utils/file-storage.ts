@@ -5,6 +5,7 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
+  PutBucketLifecycleConfigurationCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
@@ -133,4 +134,46 @@ export async function deleteImage(savedName: string): Promise<void> {
     const target = safeLocalPath(savedName);
     if (fs.existsSync(target)) fs.unlinkSync(target);
   } catch { /* already gone */ }
+}
+
+// ── S3 Lifecycle Rule (TTL) ───────────────────────────────────────────────────
+
+/**
+ * Idempotently applies an S3 lifecycle rule that automatically expires objects
+ * under the configured prefix after SUBMISSION_TTL_DAYS days (default: 90).
+ *
+ * No-op when S3 is not configured (AWS_S3_BUCKET is unset).
+ *
+ * IAM requirement: the role/user must have s3:PutLifecycleConfiguration on the bucket.
+ */
+export async function ensureS3LifecycleRule(): Promise<void> {
+  const client = s3Client();
+  if (!client) return; // local filesystem — nothing to do
+
+  const ttlDays = (() => {
+    const d = parseInt(process.env.SUBMISSION_TTL_DAYS ?? '90', 10);
+    return Number.isFinite(d) && d > 0 ? d : 90;
+  })();
+
+  const prefix = (process.env.AWS_S3_PREFIX ?? 'images').replace(/\/$/, '') + '/';
+
+  try {
+    await client.send(new PutBucketLifecycleConfigurationCommand({
+      Bucket: bucket(),
+      LifecycleConfiguration: {
+        Rules: [
+          {
+            ID: 'compliance-submission-ttl',
+            Status: 'Enabled',
+            Filter: { Prefix: prefix },
+            Expiration: { Days: ttlDays },
+          },
+        ],
+      },
+    }));
+    console.log(`[s3-lifecycle] Set expiry rule: s3://${bucket()}/${prefix}* expires after ${ttlDays} day(s)`);
+  } catch (err) {
+    // Non-fatal — log and continue. The app still works without the lifecycle rule.
+    console.error('[s3-lifecycle] Failed to set lifecycle rule:', (err as Error).message);
+  }
 }

@@ -9,6 +9,12 @@ import type { Submission, SubmissionStatus } from '@/lib/storage/json-storage';
 
 const COLLECTION = 'submissions';
 
+/** Seconds until a submission document is automatically deleted by MongoDB's TTL reaper. */
+function ttlSeconds(): number {
+  const days = parseInt(process.env.SUBMISSION_TTL_DAYS ?? '90', 10);
+  return (Number.isFinite(days) && days > 0 ? days : 90) * 24 * 60 * 60;
+}
+
 async function counters() { return getCounters(); }
 
 // MongoDB document shape — _id is ObjectId, numericId is the auto-increment surrogate
@@ -16,6 +22,8 @@ interface SubmissionDoc extends Omit<Submission, 'id' | 'status'> {
   _id?: ObjectId;
   numericId: number;
   status: string; // stored as string, cast to SubmissionStatus on read
+  /** Native Date used by the MongoDB TTL index — set to submissionDate on insert. */
+  createdAt?: Date;
 }
 
 async function col() {
@@ -29,6 +37,8 @@ export async function ensureIndexes(): Promise<void> {
   await c.createIndex({ numericId: 1 }, { unique: true });
   await c.createIndex({ account: 1 });
   await c.createIndex({ submissionDate: -1 });
+  // TTL index — MongoDB background reaper deletes documents ~60 s after expiry
+  await c.createIndex({ createdAt: 1 }, { expireAfterSeconds: ttlSeconds(), sparse: true });
 }
 
 function docToSubmission(doc: SubmissionDoc): Submission {
@@ -81,7 +91,12 @@ export async function save(submission: Submission): Promise<Submission> {
 
   // New submission — assign auto-increment id
   const id = await nextId();
-  const doc: SubmissionDoc = { ...submissionToDoc({ ...submission, id }), numericId: id };
+  const parsedDate = new Date(submission.submissionDate);
+  const doc: SubmissionDoc = {
+    ...submissionToDoc({ ...submission, id }),
+    numericId: id,
+    createdAt: Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate,
+  };
   await c.insertOne(doc);
   emitChange('submissions');
   return { ...submission, id };

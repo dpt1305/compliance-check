@@ -100,6 +100,7 @@ async function migrateFromSQLite(): Promise<void> {
         validationResult:     r.validation_result as string | null,
         validationChecklist:  r.validation_checklist as string | null,
         submissionDate:       r.submission_date as string,
+        createdAt:            (() => { const d = new Date(r.submission_date as string); return Number.isNaN(d.getTime()) ? new Date() : d; })(),
         confidenceScore:      r.confidence_score as number | null,
         hasClock:             r.has_clock != null ? !!r.has_clock : null,
         hasWindowsUpdate:     r.has_windows_update != null ? !!r.has_windows_update : null,
@@ -199,7 +200,12 @@ async function migrateFromJsonFiles(): Promise<void> {
           const docs = data.map(s => {
             // eslint-disable-next-line @typescript-eslint/no-unused-vars
             const { id, ...rest } = s;
-            return { ...rest, numericId: typeof id === 'number' ? id : 0 };
+            const parsedDate = new Date(s.submissionDate);
+            return {
+              ...rest,
+              numericId: typeof id === 'number' ? id : 0,
+              createdAt: Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate,
+            };
           });
           await db.collection('submissions').insertMany(docs);
           const maxId = Math.max(...docs.map(d => d.numericId));
@@ -273,4 +279,43 @@ export async function runMongoMigrations(): Promise<void> {
     { $setOnInsert: { seq: 0 } },
     { upsert: true },
   );
+
+  // Backfill createdAt for any submission documents that pre-date the TTL field
+  await backfillSubmissionCreatedAt();
+
+  // Apply S3 lifecycle rule for image expiry (no-op if S3 is not configured)
+  const { ensureS3LifecycleRule } = await import('@/lib/utils/file-storage');
+  await ensureS3LifecycleRule();
+}
+
+/**
+ * One-time backfill: set createdAt on any existing submission documents that
+ * were inserted before the TTL field was introduced.
+ */
+async function backfillSubmissionCreatedAt(): Promise<void> {
+  try {
+    const db = await getMongoDb();
+    const col = db.collection('submissions');
+    const result = await col.updateMany(
+      { createdAt: { $exists: false } },
+      [
+        {
+          $set: {
+            createdAt: {
+              $cond: {
+                if: { $and: [{ $ne: ['$submissionDate', null] }, { $ne: ['$submissionDate', ''] }] },
+                then: { $dateFromString: { dateString: '$submissionDate', onError: '$$NOW', onNull: '$$NOW' } },
+                else: '$$NOW',
+              },
+            },
+          },
+        },
+      ],
+    );
+    if (result.modifiedCount > 0) {
+      console.log(`[mongo-migrate] backfilled createdAt on ${result.modifiedCount} submission(s)`);
+    }
+  } catch (err) {
+    console.error('[mongo-migrate] createdAt backfill failed:', (err as Error).message);
+  }
 }
