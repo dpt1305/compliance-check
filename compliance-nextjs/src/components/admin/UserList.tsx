@@ -789,7 +789,6 @@ export default function UserList() {
                 { key: 'email', label: 'Email' },
                 { key: 'serial', label: 'Serial' },
                 { key: 'account', label: 'Account' },
-                { key: 'deviceType', label: 'Type' },
               ].map(({ key, label }) => (
                 <div key={key} className="form-field">
                   <label className="form-label">{label}</label>
@@ -800,6 +799,27 @@ export default function UserList() {
                   />
                 </div>
               ))}
+              <div className="form-field">
+                <label className="form-label">Type</label>
+                <input
+                  className="form-input"
+                  list="add-member-type-list"
+                  value={addMemberFields.deviceType}
+                  onChange={e => setAddMemberFields(f => ({ ...f, deviceType: e.target.value }))}
+                  placeholder="Choose or type a new type"
+                />
+                <datalist id="add-member-type-list">
+                  {Array.from(
+                    new Set(
+                      items
+                        .map(row => row.deviceType ?? row.submissionType ?? '')
+                        .filter(Boolean)
+                    )
+                  ).map(type => (
+                    <option key={type} value={type} />
+                  ))}
+                </datalist>
+              </div>
             </div>
             <div className="flex justify-end gap-2 px-5 py-3 border-t border-gray-100">
               <button onClick={() => setShowAddMemberModal(false)} className="btn-secondary">Cancel</button>
