@@ -258,7 +258,9 @@ export async function runMongoMigrations(): Promise<void> {
   const { ensureIndexes: ensureAdmin }      = await import('./admin-repo');
   const { ensureIndexes: ensureTracking }   = await import('./tracking-repo');
   const { ensureIndexes: ensureAttendance } = await import('./attendance-repo');
-  await Promise.all([ensureSubmission(), ensureAdmin(), ensureTracking(), ensureAttendance()]);
+  const { ensureIndexes: ensureConfig }     = await import('./config-repo');
+  const { ensureIndexes: ensureMetadata }   = await import('./metadata-repo');
+  await Promise.all([ensureSubmission(), ensureAdmin(), ensureTracking(), ensureAttendance(), ensureConfig(), ensureMetadata()]);
 
   // Try SQLite first (newest data source), then fall back to JSON files
   await migrateFromSQLite();
@@ -280,12 +282,34 @@ export async function runMongoMigrations(): Promise<void> {
     { upsert: true },
   );
 
+  // Seed default project config if missing
+  await seedDefaultConfig();
+
   // Backfill createdAt for any submission documents that pre-date the TTL field
   await backfillSubmissionCreatedAt();
 
   // Apply S3 lifecycle rule for image expiry (no-op if S3 is not configured)
   const { ensureS3LifecycleRule } = await import('@/lib/utils/file-storage');
   await ensureS3LifecycleRule();
+}
+
+/**
+ * Seed the default project config on first run if no config exists.
+ */
+async function seedDefaultConfig(): Promise<void> {
+  if (await colEmpty('project_config')) {
+    try {
+      const { seedConfig } = await import('./config-repo');
+      const { getDefaultConfig } = await import('@/lib/services/project-config');
+      const config = getDefaultConfig();
+      await seedConfig(config, 'Seeded from existing compliance config');
+      console.log('[mongo-migrate] Seeded default project config (v1)');
+    } catch (err) {
+      console.error('[mongo-migrate] Config seed failed:', (err as Error).message);
+    }
+  } else {
+    console.log('[mongo-migrate] project_config: already populated, skipping');
+  }
 }
 
 /**

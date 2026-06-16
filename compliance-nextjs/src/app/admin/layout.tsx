@@ -130,6 +130,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
 
   const navLinks = [
     { href: '/admin/user-list', label: 'User List', icon: '👥' },
+    { href: '/admin/project-config', label: 'Project Config', icon: '⚙️' },
     { href: '/admin/account-management', label: 'Account Management', icon: '👤' },
     { href: '/admin/notifications', label: 'Notifications', icon: '🔔' },
   ];

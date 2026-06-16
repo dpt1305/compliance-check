@@ -135,7 +135,19 @@ ALSO EXTRACT: the device serial number text visible in the terminal output (part
 Respond ONLY with valid JSON (no markdown):
 {"valid":true,"matchesType":true,"confidence":100,"reason":"...","deviceSerial":"extracted-serial-or-null","checklist":{"hasFullScan":true,"hasWindowsUpdate":true,"hasSerialNumber":true},"failedChecks":[],"guidelines":[],"suggestion":null}`;
 
-function selectPrompt(expectedType: string): string {
+/**
+ * Resolve the AI prompt for a given submission type.
+ * Priority: explicit prompt param → config prompt → hardcoded default → generic.
+ */
+export function resolveAiPrompt(
+  expectedType: string,
+  configPrompt?: string | null,
+): string {
+  if (configPrompt && configPrompt.trim()) return configPrompt.trim();
+  return selectHardcodedPrompt(expectedType);
+}
+
+function selectHardcodedPrompt(expectedType: string): string {
   const t = expectedType.toLowerCase();
   if (t === 'windows') return WINDOWS_PROMPT;
   if (t === 'mac') return MAC_PROMPT;
@@ -198,12 +210,12 @@ async function callProvider(
   provider: AiProvider,
   imageBytes: Buffer,
   mimeType: string,
-  expectedType: string
+  systemPrompt: string,
+  expectedType: string,
 ): Promise<AiValidationResult> {
   if (!provider.apiKey) throw new Error(`${provider.name} API key not configured`);
 
   const base64Image = imageBytes.toString('base64');
-  const systemPrompt = selectPrompt(expectedType);
   const userText = `Expected submission type: ${expectedType}. Validate this image.`;
 
   const body = {
@@ -245,10 +257,15 @@ async function callProvider(
   return JSON.parse(stripMarkdown(text)) as AiValidationResult;
 }
 
+/**
+ * Validate an image against expected type.
+ * @param aiPrompt - Optional prompt override. If provided, used directly. Otherwise falls back to hardcoded defaults.
+ */
 export async function validateImage(
   imageBytes: Buffer,
   mimeType: string,
-  expectedType: string
+  expectedType: string,
+  aiPrompt?: string | null,
 ): Promise<AiValidationResult> {
   const providers = getProviders();
 
@@ -256,9 +273,11 @@ export async function validateImage(
     return { valid: false, matchesType: false, confidence: 0, reason: 'No AI providers configured' };
   }
 
+  const systemPrompt = resolveAiPrompt(expectedType, aiPrompt || undefined);
+
   for (const provider of providers) {
     try {
-      const result = await callProvider(provider, imageBytes, mimeType, expectedType);
+      const result = await callProvider(provider, imageBytes, mimeType, systemPrompt, expectedType);
       return result;
     } catch (err) {
       console.warn(`AI provider ${provider.name} failed:`, (err as Error).message);

@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
 
-export type DataScope = 'tracking' | 'submissions' | 'attendance';
+export type DataScope = 'tracking' | 'submissions' | 'attendance' | 'config';
 
 export interface ChangeEvent {
   scope: DataScope;

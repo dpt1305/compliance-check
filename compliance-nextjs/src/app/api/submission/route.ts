@@ -3,11 +3,13 @@ import { validateImageBuffer } from '@/lib/utils/magic-bytes';
 import { storeImage, getPublicUrl } from '@/lib/utils/file-storage';
 import { generateSavedName } from '@/lib/utils/image-rename';
 import { isTypeSupported, getAllowedExtensions } from '@/lib/services/excel-mapping';
-import { validateImage } from '@/lib/services/ai-validation';
+import { validateImage, resolveAiPrompt } from '@/lib/services/ai-validation';
 import { save } from '@/lib/db/submission-repo';
 import type { Submission } from '@/lib/storage/json-storage';
 import { updateTrackingExcel, buildSeedValues } from '@/lib/services/excel-update';
 import { readAll as readAllTracking, accountInTracking, findRowForAccount } from '@/lib/db/tracking-repo';
+import { getActiveConfig } from '@/lib/services/project-config';
+import { metadataBulkInsert } from '@/lib/db/config-repo';
 
 export const maxDuration = 60;
 
@@ -104,8 +106,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
+    // Resolve AI prompt from config (falls back to hardcoded defaults)
+    const config = await getActiveConfig();
+    const configType = config?.submissionTypes?.find(t => t.key === submissionType);
+    const aiPrompt = resolveAiPrompt(submissionType, configType?.aiPrompt || undefined);
+
     // AI validation
-    const aiResult = await validateImage(imageBytes, imageFile.type, submissionType);
+    const aiResult = await validateImage(imageBytes, imageFile.type, submissionType, aiPrompt);
     const confidence = Number(aiResult.confidence ?? 0);
     const hasPerfectConfidence = Number.isFinite(confidence) && confidence === 100;
 
@@ -242,6 +249,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     const saved = await save(submission);
+
+    // Store dynamic form fields in metadata (non-image fields beyond account and submissionType)
+    if (config?.formFields) {
+      const metaEntries: { fieldKey: string; fieldValue: string }[] = [];
+      for (const field of config.formFields) {
+        if (field.key === 'account' || field.key === 'submissionType') continue;
+        if (field.type === 'file' || field.type === 'file-multiple') continue;
+        const val = formData.get(field.key);
+        if (val && typeof val === 'string' && val.trim()) {
+          metaEntries.push({ fieldKey: field.key, fieldValue: val.trim() });
+        }
+      }
+      if (metaEntries.length > 0) {
+        try {
+          await metadataBulkInsert(saved.id, metaEntries);
+        } catch (err) {
+          console.warn('[submission] metadata save failed:', (err as Error).message);
+        }
+      }
+    }
 
     updateTrackingExcel(submissionType, aiResult, account).catch(err =>
       console.error('[submission] excel-update failed:', (err as Error).message)

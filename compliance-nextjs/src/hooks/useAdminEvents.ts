@@ -2,13 +2,15 @@
 
 import { useEffect, useRef } from 'react';
 
-type DataScope = 'tracking' | 'submissions';
+type DataScope = 'tracking' | 'submissions' | 'config';
 
 interface AdminEventCallbacks {
   /** Called when tracking_members table changes (add/edit/delete/upload). */
   onTracking?: () => void;
   /** Called when submissions table changes (new submission, status update, delete). */
   onSubmissions?: () => void;
+  /** Called when project config changes (publish/revert). */
+  onConfig?: () => void;
 }
 
 const POLL_INTERVAL_MS = 5_000;
@@ -84,6 +86,7 @@ export function useAdminEvents(callbacks: AdminEventCallbacks): void {
         const data = JSON.parse(e.data) as { scope: DataScope };
         if (data.scope === 'tracking')    cbRef.current.onTracking?.();
         if (data.scope === 'submissions') cbRef.current.onSubmissions?.();
+        if (data.scope === 'config')      cbRef.current.onConfig?.();
       } catch {
         // Ignore heartbeat comments or malformed data
       }
