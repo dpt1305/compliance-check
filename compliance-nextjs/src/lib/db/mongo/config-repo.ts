@@ -323,6 +323,45 @@ export async function revertToVersion(ver: number, note: string | undefined, cre
 }
 
 /**
+ * Clone a specific version into a new draft.
+ */
+export async function cloneVersionToDraft(ver: number, createdBy: string): Promise<ConfigVersionDoc> {
+  const c = await col();
+  const now = new Date();
+
+  // Find source version
+  const source = await c.findOne({ version: ver });
+  if (!source) {
+    throw new Error(`Config version ${ver} not found`);
+  }
+
+  // Delete existing draft if any
+  await c.deleteOne({ status: 'draft' });
+
+  const nextVer = await getNextVersion();
+  const draft: ConfigVersionDoc = {
+    name: source.name,
+    description: source.description,
+    formFields: source.formFields,
+    submissionTypes: source.submissionTypes,
+    outputColumns: source.outputColumns,
+    version: nextVer,
+    status: 'draft',
+    note: undefined,
+    createdAt: now,
+    createdBy,
+    updatedAt: now,
+    updatedBy: createdBy,
+    publishedAt: undefined,
+    publishedBy: undefined,
+  };
+
+  await c.insertOne(draft);
+  emitConfigChange();
+  return draft;
+}
+
+/**
  * Update an existing draft.
  */
 export async function updateDraft(config: ProjectConfig, createdBy: string): Promise<void> {

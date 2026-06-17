@@ -1,11 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isMongoEnabled } from '@/lib/db/mongo/connection';
-import { getActiveConfig, getDraftConfig, updateDraft, createDraft, publishDraft } from '@/lib/services/project-config';
+import { getActiveConfig, getDraftConfig, updateDraft, createDraft, publishDraft, getVersion } from '@/lib/services/project-config';
 
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const isDraft = searchParams.get('draft') === 'true';
+    const versionParam = searchParams.get('version');
+
+    if (versionParam) {
+      const version = parseInt(versionParam, 10);
+      if (isNaN(version)) {
+        return NextResponse.json({ message: 'Invalid version number' }, { status: 400 });
+      }
+      const config = await getVersion(version);
+      if (!config) {
+        return NextResponse.json({ message: `Version ${version} not found` }, { status: 404 });
+      }
+      return NextResponse.json(config);
+    }
 
     if (isDraft) {
       const draft = await getDraftConfig();

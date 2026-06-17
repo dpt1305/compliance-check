@@ -26,12 +26,15 @@ export default function ProjectConfig() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
+  const [isCloning, setIsCloning] = useState(false);
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
   const [publishNote, setPublishNote] = useState('');
   const [showPublishDialog, setShowPublishDialog] = useState(false);
   const [showRevertDialog, setShowRevertDialog] = useState(false);
   const [revertVersion, setRevertVersion] = useState<number | null>(null);
   const [revertNote, setRevertNote] = useState('');
+  const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
+  const [currentVersionStatus, setCurrentVersionStatus] = useState<'draft' | 'published' | 'archived' | null>(null);
 
   function showToast(msg: string, ok: boolean) {
     setToast({ msg, ok });
@@ -47,26 +50,46 @@ export default function ProjectConfig() {
         fetch('/api/admin/config?draft=true', { headers: authHeaders() }),
       ]);
 
+      let pubConfig: ProjectConfig | null = null;
+      let draftExists = false;
+
       if (draftRes.ok) {
         const draft = await draftRes.json() as ProjectConfig;
-        setConfig(draft);
-        setHasDraft(true);
+        pubConfig = draft;
+        draftExists = true;
       } else if (pubRes.ok) {
-        const pub = await pubRes.json() as ProjectConfig;
-        setConfig(pub);
-        setHasDraft(false);
+        pubConfig = await pubRes.json() as ProjectConfig;
       }
 
       if (verRes.ok) {
         const vs = await verRes.json() as ConfigVersionSummary[];
         setVersions(vs);
+
+        // If a version was selected, load it
+        if (selectedVersion !== null) {
+          const verRes2 = await fetch(`/api/admin/config?version=${selectedVersion}`, { headers: authHeaders() });
+          if (verRes2.ok) {
+            setConfig(await verRes2.json() as ProjectConfig);
+            const matched = vs.find(v => v.version === selectedVersion);
+            setCurrentVersionStatus(matched?.status ?? null);
+            setHasDraft(matched?.status === 'draft');
+            setIsLoading(false);
+            return;
+          }
+        }
+      }
+
+      if (pubConfig) {
+        setConfig(pubConfig);
+        setHasDraft(draftExists);
+        setCurrentVersionStatus(draftExists ? 'draft' : 'published');
       }
     } catch {
       showToast('Failed to load config', false);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [selectedVersion]);
 
   useEffect(() => { loadConfig(); }, [loadConfig]);
 
@@ -132,6 +155,8 @@ export default function ProjectConfig() {
       setShowPublishDialog(false);
       setPublishNote('');
       showToast('Config published', true);
+      setSelectedVersion(null);
+      setCurrentVersionStatus(null);
       await loadConfig();
     } catch {
       showToast('Failed to publish', false);
@@ -152,6 +177,8 @@ export default function ProjectConfig() {
       setRevertVersion(null);
       setRevertNote('');
       showToast(`Reverted to v${version}`, true);
+      setSelectedVersion(null);
+      setCurrentVersionStatus(null);
       await loadConfig();
     } catch {
       showToast('Failed to revert', false);
@@ -167,9 +194,54 @@ export default function ProjectConfig() {
       });
       if (!res.ok) throw new Error();
       showToast(`Deleted v${version}`, true);
+      setSelectedVersion(null);
+      setCurrentVersionStatus(null);
       await loadConfig();
     } catch {
       showToast('Failed to delete version', false);
+    }
+  }
+
+  async function handleCloneVersion(version: number) {
+    if (!confirm(`Clone v${version} into a new draft?`)) return;
+    setIsCloning(true);
+    try {
+      const res = await fetch('/api/admin/config/versions', {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({ action: 'clone', version }),
+      });
+      if (!res.ok) throw new Error();
+      showToast(`Cloned v${version} to draft`, true);
+      setSelectedVersion(null);
+      setCurrentVersionStatus(null);
+      await loadConfig();
+    } catch {
+      showToast('Failed to clone version', false);
+    } finally {
+      setIsCloning(false);
+    }
+  }
+
+  function handleVersionSelect(version: number) {
+    setSelectedVersion(version || null);
+    if (version) {
+      setIsLoading(true);
+      fetch(`/api/admin/config?version=${version}`, { headers: authHeaders() })
+        .then(r => r.json())
+        .then(data => {
+          setConfig(data as ProjectConfig);
+          const matched = versions.find(v => v.version === version);
+          setCurrentVersionStatus(matched?.status ?? 'archived');
+          setHasDraft(matched?.status === 'draft');
+          setIsLoading(false);
+        })
+        .catch(() => {
+          showToast('Failed to load version', false);
+          setIsLoading(false);
+        });
+    } else {
+      loadConfig();
     }
   }
 
@@ -205,29 +277,77 @@ export default function ProjectConfig() {
       )}
 
       {/* Draft indicator */}
-      {hasDraft && (
+      {hasDraft && currentVersionStatus === 'draft' && (
         <div className="mb-4 px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 flex items-center justify-between">
           <span><strong>Draft Mode</strong> — You are editing a draft. Changes are not live until published.</span>
           <button onClick={() => setShowPublishDialog(true)} className="btn-primary text-sm px-3 py-1">Publish</button>
         </div>
       )}
 
+      {/* Version indicator */}
+      {selectedVersion !== null && (
+        <div className={`mb-4 px-4 py-2 rounded-lg text-sm flex items-center justify-between ${
+          currentVersionStatus === 'published'
+            ? 'bg-green-50 border border-green-200 text-green-800'
+            : 'bg-gray-50 border border-gray-200 text-gray-700'
+        }`}>
+          <span>
+            Viewing <strong>v{selectedVersion}</strong> ({currentVersionStatus})
+            {currentVersionStatus !== 'draft' && ' — read-only'}
+          </span>
+          <button onClick={() => { setSelectedVersion(null); setCurrentVersionStatus(null); loadConfig(); }} className="btn-secondary text-xs px-2 py-1">
+            Back to Current
+          </button>
+        </div>
+      )}
+
       {/* Toolbar */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          {!hasDraft && (
+          {!hasDraft && currentVersionStatus !== 'draft' && (
             <button onClick={handleCreateDraft} className="btn-secondary text-sm">Edit Config</button>
           )}
-          {hasDraft && (
+          {hasDraft && currentVersionStatus === 'draft' && (
             <button onClick={handleSaveDraft} disabled={isSaving} className="btn-primary text-sm flex items-center gap-2">
               {isSaving && <span className="spinner w-3 h-3 border-white border-t-transparent"></span>}
               Save Draft
             </button>
           )}
+          {currentVersionStatus === 'published' && (
+            <span className="text-sm text-gray-500">Published version — read-only</span>
+          )}
+          {currentVersionStatus === 'archived' && (
+            <span className="text-sm text-gray-500">Archived version — read-only</span>
+          )}
         </div>
-        {hasDraft && (
-          <button onClick={() => setShowPublishDialog(true)} className="btn-primary text-sm">Publish</button>
-        )}
+        <div className="flex items-center gap-2">
+          {hasDraft && currentVersionStatus === 'draft' && (
+            <button onClick={() => setShowPublishDialog(true)} disabled={isPublishing} className="btn-primary text-sm flex items-center gap-2">
+              {isPublishing && <span className="spinner w-4 h-4 border-white border-t-transparent"></span>}
+              Publish
+            </button>
+          )}
+          <select
+            className="form-select text-sm w-40"
+            value={selectedVersion ?? ''}
+            onChange={e => handleVersionSelect(Number(e.target.value))}
+          >
+            <option value="">Current</option>
+            {versions.map(v => (
+              <option key={v.version} value={v.version}>v{v.version} ({v.status})</option>
+            ))}
+          </select>
+          {selectedVersion !== null && (
+            <button
+              onClick={() => handleCloneVersion(selectedVersion)}
+              disabled={isCloning}
+              className="btn-secondary text-sm flex items-center gap-2"
+            >
+              {isCloning && <span className="spinner w-3 h-3 border-gray-400 border-t-transparent"></span>}
+              Clone to Draft
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Tabs */}
@@ -275,6 +395,7 @@ export default function ProjectConfig() {
           versions={versions}
           onRevert={(v) => { setRevertVersion(v); setShowRevertDialog(true); }}
           onDelete={handleDeleteVersion}
+          onClone={handleCloneVersion}
         />
       )}
 
@@ -699,7 +820,7 @@ function PreviewTab({ config }: { config: ProjectConfig }) {
   );
 }
 
-function VersionsTab({ versions, onRevert, onDelete }: { versions: ConfigVersionSummary[]; onRevert: (v: number) => void; onDelete: (v: number) => void }) {
+function VersionsTab({ versions, onRevert, onDelete, onClone }: { versions: ConfigVersionSummary[]; onRevert: (v: number) => void; onDelete: (v: number) => void; onClone: (v: number) => void }) {
   function formatDate(d: Date) {
     return new Date(d).toLocaleString();
   }
@@ -726,6 +847,7 @@ function VersionsTab({ versions, onRevert, onDelete }: { versions: ConfigVersion
             {v.publishedAt && <p className="text-xs text-gray-400">Published {formatDate(v.publishedAt)} by {v.publishedBy}</p>}
           </div>
           <div className="flex gap-2">
+            <button onClick={() => onClone(v.version)} className="btn-secondary text-xs">Clone</button>
             {v.status !== 'published' && (
               <button onClick={() => onRevert(v.version)} className="btn-secondary text-xs">Revert</button>
             )}

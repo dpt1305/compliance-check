@@ -117,6 +117,17 @@ export async function deleteVersion(version: number): Promise<boolean> {
   return result;
 }
 
+/**
+ * Clone a specific version into a new draft.
+ */
+export async function cloneVersionToDraft(version: number, createdBy: string): Promise<number> {
+  if (!isMongoEnabled()) throw new Error('Config requires MongoDB');
+  const { cloneVersionToDraft } = await import('../db/mongo/config-repo');
+  const doc = await cloneVersionToDraft(version, createdBy);
+  clearConfigCache();
+  return doc.version;
+}
+
 // ── Default Config (seed) ─────────────────────────────────────────────────────
 
 /**
