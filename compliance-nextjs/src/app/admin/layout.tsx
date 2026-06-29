@@ -56,7 +56,29 @@ function AdminShell({ children }: { children: React.ReactNode }) {
     try {
       const sortCol = sessionStorage.getItem('ul_sort_col') ?? 'name';
       const sortDir = sessionStorage.getItem('ul_sort_dir') ?? 'asc';
-      const res = await fetch(`/api/admin/export?sortCol=${encodeURIComponent(sortCol)}&sortDir=${encodeURIComponent(sortDir)}`, {
+      const exportStateRaw = sessionStorage.getItem('ul_export_state');
+      const params = new URLSearchParams();
+      params.set('sortCol', sortCol);
+      params.set('sortDir', sortDir);
+
+      if (exportStateRaw) {
+        try {
+          const exportState = JSON.parse(exportStateRaw) as {
+            filterProjects?: string[] | null;
+            filterMonth?: string;
+            filterYear?: string;
+            filterTags?: string[];
+          };
+          exportState.filterProjects?.forEach(project => params.append('project', project));
+          if (exportState.filterMonth) params.set('month', exportState.filterMonth);
+          if (exportState.filterYear) params.set('year', exportState.filterYear);
+          exportState.filterTags?.forEach(tag => params.append('tag', tag));
+        } catch {
+          // ignore malformed persisted state
+        }
+      }
+
+      const res = await fetch(`/api/admin/export?${params.toString()}`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (!res.ok) { showToast('Export failed', false); return; }

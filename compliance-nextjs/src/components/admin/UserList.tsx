@@ -425,7 +425,18 @@ export default function UserList() {
   useEffect(() => {
     sessionStorage.setItem("ul_sort_col", sortCol);
     sessionStorage.setItem("ul_sort_dir", sortDir);
-  }, [sortCol, sortDir]);
+    sessionStorage.setItem(
+      "ul_export_state",
+      JSON.stringify({
+        sortCol,
+        sortDir,
+        filterProjects,
+        filterMonth,
+        filterYear,
+        filterTags,
+      }),
+    );
+  }, [filterMonth, filterProjects, filterTags, filterYear, sortCol, sortDir]);
 
   const sortedItems = useMemo(
     () =>
@@ -956,6 +967,16 @@ export default function UserList() {
         trackingRowNum: row.trackingRowNum,
         account: row.trackingAccount ?? row.account,
         submissionId: row.submissionId,
+        project: row.project,
+        email: row.email,
+        serial: row.serial ?? row.deviceSerial,
+        deviceType: row.deviceType ?? row.submissionType,
+        malwareAlerts: row.malwareAlerts,
+        complianceChecks: row.complianceChecks,
+        seedConfiguration: row.seedConfiguration,
+        operatingSystem: row.operatingSystem,
+        followUpAction: row.followUpAction,
+        responseFromTicket: row.responseFromTicket,
       }));
 
       if (members.length === 0) {
