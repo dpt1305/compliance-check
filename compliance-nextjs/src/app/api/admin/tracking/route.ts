@@ -3,10 +3,13 @@ import path from 'path';
 import AdmZip from 'adm-zip';
 import { NextRequest, NextResponse } from 'next/server';
 import ExcelJS from 'exceljs';
+import { COOKIE_NAME, extractBearerToken, verifyToken } from '@/lib/auth/jwt';
+import { findByUsername } from '@/lib/db/admin-repo';
 import { exportFollowUpAction, exportIssueCount } from '@/lib/services/excel-export';
+import { getUserListData, type UserListEntry } from '@/lib/services/admin-user-list';
 import { trackingFilePath } from '@/lib/utils/tracking-path';
 import { readTrackingRows } from '@/lib/services/tracking-reader';
-import { findAll } from '@/lib/db/submission-repo';
+import { findAll, findByIds } from '@/lib/db/submission-repo';
 import type { Submission } from '@/lib/storage/json-storage';
 import { buildSubmissionMatchIndex, getMatchesForTrackingRow } from '@/lib/services/admin-user-list';
 import { readAll as readTrackingDB, readActive as readActiveTrackingDB, replaceAll, mergeFromUpload, updateSeedFields } from '@/lib/db/tracking-repo';
@@ -81,6 +84,7 @@ interface FilteredMember {
   trackingRowNum?: number;
   account?: string;
   submissionId?: number;
+  submissionStatus?: string;
   project?: string;
   email?: string;
   serial?: string;
@@ -96,7 +100,11 @@ interface FilteredMember {
 interface FilteredExportBody {
   month?: number;
   year?: number;
-  members: FilteredMember[];
+  projects?: string[] | null;
+  tags?: string[];
+  sortCol?: string;
+  sortDir?: 'asc' | 'desc';
+  members?: FilteredMember[];
 }
 
 /** Sanitize a name for use in a filename — preserves spaces. */
@@ -106,6 +114,70 @@ function sanitizeName(name: string): string {
     .replace(/\s{2,}/g, ' ')
     .trim()
     .slice(0, 60);
+}
+
+async function resolveCallerScope(req: NextRequest): Promise<{ callerRole: string; callerTeams: string[] }> {
+  const bearerToken = extractBearerToken(req.headers.get('authorization'));
+  const cookieToken = req.cookies.get(COOKIE_NAME)?.value ?? null;
+  const token = bearerToken ?? cookieToken;
+  const callerUsername = token ? await verifyToken(token) : null;
+
+  let callerRole = 'Admin';
+  let callerTeams: string[] = [];
+  if (callerUsername) {
+    const caller = await findByUsername(callerUsername);
+    if (caller) {
+      callerRole = caller.role ?? 'Admin';
+      try {
+        callerTeams = JSON.parse(caller.teams ?? '[]') as string[];
+      } catch {
+        callerTeams = [];
+      }
+    }
+  }
+
+  return { callerRole, callerTeams };
+}
+
+function mapEntriesToFilteredMembers(items: UserListEntry[]): FilteredMember[] {
+  return items.map((row, index) => ({
+    no: index + 1,
+    name: row.name,
+    trackingRowNum: row.trackingRowNum,
+    account: row.trackingAccount ?? row.account,
+    submissionId: row.submissionId,
+    submissionStatus: row.submissionStatus,
+    project: row.project,
+    email: row.email,
+    serial: row.serial ?? row.deviceSerial,
+    deviceType: row.deviceType ?? row.submissionType,
+    malwareAlerts: row.malwareAlerts,
+    complianceChecks: row.complianceChecks,
+    seedConfiguration: row.seedConfiguration,
+    operatingSystem: row.operatingSystem,
+    followUpAction: row.followUpAction,
+    responseFromTicket: row.responseFromTicket,
+  }));
+}
+
+async function buildFilteredMembers(req: NextRequest, body: FilteredExportBody): Promise<FilteredMember[]> {
+  if (Array.isArray(body.members) && body.members.length > 0) {
+    return body.members;
+  }
+
+  const { callerRole, callerTeams } = await resolveCallerScope(req);
+  const { items } = await getUserListData({
+    projects: body.projects ?? null,
+    month: body.month ?? null,
+    year: body.year ?? null,
+    tags: body.tags ?? [],
+    callerRole,
+    callerTeams,
+    sortCol: body.sortCol,
+    sortDir: body.sortDir ?? 'asc',
+  });
+
+  return mapEntriesToFilteredMembers(items);
 }
 
 /**
@@ -127,7 +199,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     : currentBangkokMonthYear();
   const fileName = `${trackingExportBaseName(month, year)}.xlsx`;
 
-  const rows = await readActiveTrackingDB();
+  const [rows, allSubmissions] = await Promise.all([
+    readActiveTrackingDB(),
+    findAll(),
+  ]);
   if (rows.length === 0) {
     // Fall back to disk file if no tracking rows are available in the active data store yet.
     const diskPath = trackingFilePath();
@@ -146,7 +221,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   // Build tracking-row-id → best submission status map
-  const allSubmissions = await findAll();
   const rowIdToStatus = buildRowStatusMap(rows, allSubmissions);
 
   // Generate fresh xlsx from DB rows
@@ -247,14 +321,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   try {
     const body = await req.json() as FilteredExportBody;
-    const { month, year, members } = body;
+    const { month, year } = body;
+    const members = await buildFilteredMembers(req, body);
 
-    if (!members || !Array.isArray(members) || members.length === 0) {
+    if (members.length === 0) {
       return NextResponse.json({ message: 'No members provided' }, { status: 400 });
     }
-
-    const allSubmissions = await findAll();
-    const submissionById = new Map(allSubmissions.map(s => [s.id, s]));
 
     const hasDate = month !== undefined && year !== undefined &&
       !isNaN(month) && !isNaN(year) && month >= 1 && month <= 12 && year > 0;
@@ -264,74 +336,63 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       : currentBangkokMonthYear();
     const baseName = trackingExportBaseName(exportMonth, exportYear);
     const zip = new AdmZip();
+    const submissionIds = [...new Set(
+      members
+        .map(member => member.submissionId)
+        .filter((submissionId): submissionId is number => typeof submissionId === 'number' && submissionId > 0)
+    )];
+    const selectedSubmissions = await findByIds(submissionIds);
+    const submissionById = new Map(selectedSubmissions.map(submission => [submission.id, submission]));
 
-    // Build filtered tracking xlsx from DB rows
-    {
-      const allDbRows = await readActiveTrackingDB();
-      const rowById = new Map(allDbRows.map(row => [row.id, row]));
-
-      if (members.length > 0) {
-        const outWb = new ExcelJS.Workbook();
-        const outSheet = outWb.addWorksheet('Sheet1');
-        outSheet.addRow(['No.', 'Project', 'Name', 'Account', 'Mail NCS', 'Serial Number', 'Type',
-          'Malware Alerts', 'Compliance Checks/Trellix', 'SEED Configuration', 'Operating System',
-          'Follow up action', 'EVD / Ticket', 'Status', 'Note']);
-        for (const member of members) {
-          const row = member.trackingRowNum ? rowById.get(member.trackingRowNum) : undefined;
-          const sub = member.submissionId ? submissionById.get(member.submissionId) : undefined;
-          outSheet.addRow([
-            member.no,
-            row?.project ?? member.project ?? '',
-            row?.name ?? member.name ?? '',
-            row?.account ?? member.account ?? '',
-            row?.email ?? member.email ?? '',
-            row?.serial ?? member.serial ?? '',
-            row?.deviceType ?? member.deviceType ?? sub?.submissionType ?? '',
-            exportIssueCount(row?.malwareAlerts ?? member.malwareAlerts ?? sub?.malwareAlerts),
-            exportIssueCount(row?.complianceChecks ?? member.complianceChecks ?? sub?.complianceCheck),
-            exportIssueCount(row?.seedConfiguration ?? member.seedConfiguration ?? sub?.seedConfiguration),
-            exportIssueCount(row?.operatingSystem ?? member.operatingSystem ?? sub?.operatingSystem),
-            exportFollowUpAction(row?.followUpAction ?? member.followUpAction),
-            row?.responseFromTicket ?? member.responseFromTicket ?? 'Refer photo captured in folder',
-            deriveTrackingStatus(sub?.status),
-            '',
-          ]);
-        }
-        const xlsxBuf = await outWb.xlsx.writeBuffer();
-        zip.addFile(`${baseName}.xlsx`, Buffer.from(xlsxBuf));
+    if (members.length > 0) {
+      const outWb = new ExcelJS.Workbook();
+      const outSheet = outWb.addWorksheet('Sheet1');
+      outSheet.addRow(['No.', 'Project', 'Name', 'Account', 'Mail NCS', 'Serial Number', 'Type',
+        'Malware Alerts', 'Compliance Checks/Trellix', 'SEED Configuration', 'Operating System',
+        'Follow up action', 'EVD / Ticket', 'Status', 'Note']);
+      for (const member of members) {
+        const sub = member.submissionId ? submissionById.get(member.submissionId) : undefined;
+        outSheet.addRow([
+          member.no,
+          member.project ?? '',
+          member.name ?? '',
+          member.account ?? '',
+          member.email ?? '',
+          member.serial ?? '',
+          member.deviceType ?? sub?.submissionType ?? '',
+          exportIssueCount(member.malwareAlerts ?? sub?.malwareAlerts),
+          exportIssueCount(member.complianceChecks ?? sub?.complianceCheck),
+          exportIssueCount(member.seedConfiguration ?? sub?.seedConfiguration),
+          exportIssueCount(member.operatingSystem ?? sub?.operatingSystem),
+          exportFollowUpAction(member.followUpAction),
+          member.responseFromTicket ?? 'Refer photo captured in folder',
+          deriveTrackingStatus(member.submissionStatus ?? sub?.status),
+          '',
+        ]);
       }
+      const xlsxBuf = await outWb.xlsx.writeBuffer();
+      zip.addFile(`${baseName}.xlsx`, Buffer.from(xlsxBuf));
     }
 
-    const periodSubs = hasDate
-      ? allSubmissions.filter(s => {
-          if (!s.submissionDate) return false;
-          const d = new Date(s.submissionDate);
-          return d.getMonth() + 1 === month && d.getFullYear() === year;
-        })
-      : allSubmissions;
-    const periodSubsByAccount = new Map(periodSubs.map(s => [s.account?.toLowerCase() ?? '', s]));
-    const periodSubsById = new Map(periodSubs.map(s => [s.id, s]));
-
-    for (const member of members) {
-      let sub = member.submissionId
-        ? periodSubsById.get(member.submissionId) ?? submissionById.get(member.submissionId)
-        : undefined;
-
-      if (!sub && member.account) {
-        sub = periodSubsByAccount.get(member.account.toLowerCase());
-      }
-
-      if (!sub?.imageSavedName) continue;
+    const imageFiles = await Promise.all(members.map(async member => {
+      const sub = member.submissionId ? submissionById.get(member.submissionId) : undefined;
+      if (!sub?.imageSavedName) return null;
 
       const imgBuf = await getImageBuffer(sub.imageSavedName);
-      if (!imgBuf) continue;
+      if (!imgBuf) return null;
 
       const ext = path.extname(sub.imageSavedName).toLowerCase() || '.png';
-      const nn  = String(member.no).padStart(2, '0');
+      const nn = String(member.no).padStart(2, '0');
       const safeName = sanitizeName(member.name) || `member_${nn}`;
-      const fileName = `${nn}_${safeName}${ext}`;
+      return {
+        fileName: `images/${nn}_${safeName}${ext}`,
+        buffer: imgBuf,
+      };
+    }));
 
-      zip.addFile(`images/${fileName}`, imgBuf);
+    for (const imageFile of imageFiles) {
+      if (!imageFile) continue;
+      zip.addFile(imageFile.fileName, imageFile.buffer);
     }
 
     const zipBuf = zip.toBuffer();
