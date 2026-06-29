@@ -3,9 +3,17 @@
  */
 import bcrypt from 'bcryptjs';
 import { getMongoDb } from './connection';
-import type { AdminUser } from '../admin-repo';
 
-export type { AdminUser };
+export interface AdminUser {
+  id: string;
+  username: string;
+  password: string;
+  email: string;
+  active: boolean;
+  role: string;
+  teams: string;
+  mustChangePassword: boolean;
+}
 
 const COLLECTION = 'admins';
 

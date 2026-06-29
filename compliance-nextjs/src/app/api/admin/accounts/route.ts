@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { findAll, findByUsername, saveAdmin } from '@/lib/db/admin-repo';
-import { runMigrations } from '@/lib/db/migrate';
+import { ensureDbReady } from '@/lib/db/bootstrap';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,7 +19,7 @@ function toPublic(admin: Awaited<ReturnType<typeof findAll>>[number]) {
 }
 
 export async function GET(): Promise<NextResponse> {
-  await runMigrations();
+  await ensureDbReady();
   try {
     const admins = await findAll();
     return NextResponse.json(admins.map(toPublic));
@@ -30,7 +30,7 @@ export async function GET(): Promise<NextResponse> {
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  await runMigrations();
+  await ensureDbReady();
   try {
     const body = await req.json() as {
       username?: string;

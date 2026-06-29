@@ -30,6 +30,14 @@ function gmt7Now(): { month: number; year: number } {
   return { month: d.getMonth() + 1, year: d.getFullYear() };
 }
 
+function trackingExportFileName(
+  month: number,
+  year: number,
+  extension: "xlsx" | "zip",
+): string {
+  return `SDC_IT compliance report_${MONTH_NAMES[month - 1]}_${year}.${extension}`;
+}
+
 interface UserListEntry {
   source: "tracking" | "submission" | "both";
   trackingRowNum?: number;
@@ -425,7 +433,18 @@ export default function UserList() {
   useEffect(() => {
     sessionStorage.setItem("ul_sort_col", sortCol);
     sessionStorage.setItem("ul_sort_dir", sortDir);
-  }, [sortCol, sortDir]);
+    sessionStorage.setItem(
+      "ul_export_state",
+      JSON.stringify({
+        sortCol,
+        sortDir,
+        filterProjects,
+        filterMonth,
+        filterYear,
+        filterTags,
+      }),
+    );
+  }, [filterMonth, filterProjects, filterTags, filterYear, sortCol, sortDir]);
 
   const sortedItems = useMemo(
     () =>
@@ -908,9 +927,12 @@ export default function UserList() {
 
       if (!hasAnyFilter) {
         // No filters at all — return raw tracking.xlsx
-        const res = await fetch("/api/admin/tracking", {
+        const res = await fetch(
+          `/api/admin/tracking?month=${nowMonth}&year=${nowYear}`,
+          {
           headers: authHeaders(),
-        });
+          },
+        );
         if (!res.ok) {
           const d = (await res.json()) as { message?: string };
           showToast(d.message ?? "Tracking file not found", false);
@@ -920,7 +942,7 @@ export default function UserList() {
         const objectUrl = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = objectUrl;
-        a.download = "tracking.xlsx";
+        a.download = trackingExportFileName(nowMonth, nowYear, "xlsx");
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -956,6 +978,16 @@ export default function UserList() {
         trackingRowNum: row.trackingRowNum,
         account: row.trackingAccount ?? row.account,
         submissionId: row.submissionId,
+        project: row.project,
+        email: row.email,
+        serial: row.serial ?? row.deviceSerial,
+        deviceType: row.deviceType ?? row.submissionType,
+        malwareAlerts: row.malwareAlerts,
+        complianceChecks: row.complianceChecks,
+        seedConfiguration: row.seedConfiguration,
+        operatingSystem: row.operatingSystem,
+        followUpAction: row.followUpAction,
+        responseFromTicket: row.responseFromTicket,
       }));
 
       if (members.length === 0) {
@@ -982,8 +1014,8 @@ export default function UserList() {
       const a = document.createElement("a");
       a.href = objectUrl;
       a.download = hasP
-        ? `tracking_${MONTH_NAMES[month - 1]}_${year}.zip`
-        : "tracking_filtered.zip";
+        ? trackingExportFileName(month, year, "zip")
+        : trackingExportFileName(nowMonth, nowYear, "zip");
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

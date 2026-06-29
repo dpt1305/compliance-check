@@ -36,9 +36,8 @@ src/
     useAdminEvents.ts  # SSE hook for real-time UI updates
   lib/
     auth/              # JWT helpers
-    db/                # SQLite layer (Drizzle ORM + better-sqlite3)
-      schema.ts        # Table definitions
-      index.ts         # DB singleton, WAL, version counter, emitChange wiring
+    db/                # MongoDB repository layer
+      index.ts         # Tracking version helpers
       tracking-repo.ts # tracking_members CRUD + matching helpers
       submission-repo.ts # submissions CRUD
       admin-repo.ts    # admins CRUD + default seed

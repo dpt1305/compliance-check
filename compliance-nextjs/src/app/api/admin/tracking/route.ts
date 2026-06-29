@@ -20,6 +20,17 @@ const MONTH_NAMES = [
   'July','August','September','October','November','December',
 ];
 
+function trackingExportBaseName(month: number, year: number): string {
+  return `SDC_IT compliance report_${MONTH_NAMES[month - 1]}_${year}`;
+}
+
+function currentBangkokMonthYear(): { month: number; year: number } {
+  const now = new Date(
+    new Date().toLocaleString('en-US', { timeZone: 'Asia/Bangkok' }),
+  );
+  return { month: now.getMonth() + 1, year: now.getFullYear() };
+}
+
 function isXlsxBuffer(buf: Buffer): boolean {
   return buf.length >= 4 &&
     buf[0] === 0x50 && buf[1] === 0x4B &&
@@ -84,6 +95,16 @@ interface FilteredMember {
   trackingRowNum?: number;
   account?: string;
   submissionId?: number;
+  project?: string;
+  email?: string;
+  serial?: string;
+  deviceType?: string;
+  malwareAlerts?: string;
+  complianceChecks?: string;
+  seedConfiguration?: string;
+  operatingSystem?: string;
+  followUpAction?: string;
+  responseFromTicket?: string;
 }
 
 interface FilteredExportBody {
@@ -106,10 +127,23 @@ function sanitizeName(name: string): string {
  *   - Generate and download tracking.xlsx from DB rows
  *   - Filtered ZIP exports are handled exclusively by POST
  */
-export async function GET(_req: NextRequest): Promise<NextResponse> {
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  const monthParam = parseInt(req.nextUrl.searchParams.get('month') ?? '', 10);
+  const yearParam = parseInt(req.nextUrl.searchParams.get('year') ?? '', 10);
+  const hasPeriod =
+    !Number.isNaN(monthParam) &&
+    !Number.isNaN(yearParam) &&
+    monthParam >= 1 &&
+    monthParam <= 12 &&
+    yearParam > 0;
+  const { month, year } = hasPeriod
+    ? { month: monthParam, year: yearParam }
+    : currentBangkokMonthYear();
+  const fileName = `${trackingExportBaseName(month, year)}.xlsx`;
+
   const rows = await readActiveTrackingDB();
   if (rows.length === 0) {
-    // Fall back to disk file if DB is empty (migration hasn't run yet)
+    // Fall back to disk file if no tracking rows are available in the active data store yet.
     const diskPath = trackingFilePath();
     if (fs.existsSync(diskPath)) {
       const buf = fs.readFileSync(diskPath);
@@ -117,7 +151,7 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
         status: 200,
         headers: {
           'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          'Content-Disposition': 'attachment; filename="tracking.xlsx"',
+          'Content-Disposition': `attachment; filename="${fileName}"`,
           'Content-Length': String(buf.length),
         },
       });
@@ -154,7 +188,7 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
     status: 200,
     headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'Content-Disposition': 'attachment; filename="tracking.xlsx"',
+      'Content-Disposition': `attachment; filename="${fileName}"`,
       'Content-Length': String(buf.length),
     },
   });
@@ -239,32 +273,40 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const hasDate = month !== undefined && year !== undefined &&
       !isNaN(month) && !isNaN(year) && month >= 1 && month <= 12 && year > 0;
 
-    const monthName = hasDate ? MONTH_NAMES[month - 1] : 'export';
-    const baseName  = hasDate ? `tracking_${monthName}_${year}` : 'tracking_export';
+    const { month: exportMonth, year: exportYear } = hasDate
+      ? { month, year }
+      : currentBangkokMonthYear();
+    const baseName = trackingExportBaseName(exportMonth, exportYear);
     const zip = new AdmZip();
 
     // Build filtered tracking xlsx from DB rows
     {
       const allDbRows = await readActiveTrackingDB();
-      const memberIdSet = new Set(members.filter(m => m.trackingRowNum).map(m => m.trackingRowNum as number));
-      const idToMember = new Map(members.filter(m => m.trackingRowNum).map(m => [m.trackingRowNum as number, m]));
-      const filteredDbRows = allDbRows.filter(r => memberIdSet.has(r.id));
+      const rowById = new Map(allDbRows.map(row => [row.id, row]));
 
-      if (filteredDbRows.length > 0) {
+      if (members.length > 0) {
         const outWb = new ExcelJS.Workbook();
         const outSheet = outWb.addWorksheet('Sheet1');
         outSheet.addRow(['No.', 'Project', 'Name', 'Account', 'Mail NCS', 'Serial Number', 'Type',
           'Malware Alerts', 'Compliance Checks/Trellix', 'SEED Configuration', 'Operating System',
           'Follow up action', 'EVD / Ticket', 'Status', 'Note']);
-        for (const r of filteredDbRows) {
-          const m = idToMember.get(r.id);
-          const sub = m?.submissionId ? submissionById.get(m.submissionId) : undefined;
+        for (const member of members) {
+          const row = member.trackingRowNum ? rowById.get(member.trackingRowNum) : undefined;
+          const sub = member.submissionId ? submissionById.get(member.submissionId) : undefined;
           outSheet.addRow([
-            m?.no ?? r.no ?? '', r.project ?? '', r.name ?? '', r.account ?? '', r.email ?? '',
-            r.serial ?? '', r.deviceType ?? '',
-            r.malwareAlerts ?? '', r.complianceChecks ?? '', r.seedConfiguration ?? '',
-            r.operatingSystem ?? '', r.followUpAction ?? '',
-            r.responseFromTicket ?? 'Refer photo captured in folder',
+            member.no,
+            row?.project ?? member.project ?? '',
+            row?.name ?? member.name ?? '',
+            row?.account ?? member.account ?? '',
+            row?.email ?? member.email ?? '',
+            row?.serial ?? member.serial ?? '',
+            row?.deviceType ?? member.deviceType ?? sub?.submissionType ?? '',
+            row?.malwareAlerts ?? member.malwareAlerts ?? sub?.malwareAlerts ?? '',
+            row?.complianceChecks ?? member.complianceChecks ?? sub?.complianceCheck ?? '',
+            row?.seedConfiguration ?? member.seedConfiguration ?? sub?.seedConfiguration ?? '',
+            row?.operatingSystem ?? member.operatingSystem ?? sub?.operatingSystem ?? '',
+            row?.followUpAction ?? member.followUpAction ?? '',
+            row?.responseFromTicket ?? member.responseFromTicket ?? 'Refer photo captured in folder',
             deriveTrackingStatus(sub?.status),
             '',
           ]);

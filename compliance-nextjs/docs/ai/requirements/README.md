@@ -70,11 +70,11 @@ Provide a web-based compliance submission and administration system that:
 
 ## Constraints & Assumptions
 - Stack is Next.js 15 (App Router) with API routes; no separate Spring Boot/Angular service in this repository.
-- Persistence is **SQLite** (via Drizzle ORM + better-sqlite3):
-  - `SQLITE_DB_PATH` (default `./data/compliance.db`) — all structured data.
+- Persistence is **MongoDB** for structured runtime data:
+  - `MONGODB_URI` — required MongoDB connection string.
   - `STORAGE_IMAGE_PATH` or S3 for image files (unchanged).
-  - Legacy JSON files (`submissions.json`, `admins.json`) and `tracking.xlsx` are auto-migrated into SQLite on first startup and are no longer the live data source.
-- Excel (`tracking.xlsx`) remains the **import/export format** to move data between environments (local ↔ production), but runtime reads/writes go through SQLite.
+  - Legacy JSON files (`submissions.json`, `admins.json`) are still available as seed data on first startup.
+- Excel (`tracking.xlsx`) remains the **import/export format** to move data between environments (local ↔ production), while runtime reads/writes go through MongoDB.
 - Supported image formats: JPG/JPEG/PNG/WEBP, max 10MB.
 - Default admin seed exists (`admin` / `Admin@123`) and must be changed in production.
 - AI providers depend on external endpoints and keys.

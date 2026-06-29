@@ -100,8 +100,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  const offset = Math.max(0, parseInt(sp.get('offset') ?? '0', 10) || 0);
-  const limit  = Math.max(1, Math.min(99999, parseInt(sp.get('limit') ?? '50', 10) || 50));
   const projectsParam = sp.getAll('project');
   const filterProjects: string[] | null = projectsParam.length > 0 ? projectsParam : null;
   const monthParam = sp.get('month');
@@ -278,8 +276,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     result = [];
   }
 
-  const total = result.length;
-  const items = result.slice(offset, offset + limit);
+  const items = result;
+  const total = items.length;
   const projects = await getDistinctProjects();
   const summary = {
     approved:     result.filter(r => r.submissionStatus === 'APPROVED').length,
@@ -405,4 +403,3 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ message: 'Failed to delete member' }, { status: 500 });
   }
 }
-

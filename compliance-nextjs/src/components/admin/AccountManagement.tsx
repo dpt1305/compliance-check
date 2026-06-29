@@ -97,7 +97,7 @@ export default function AccountManagement() {
   }, [loadAccounts]);
 
   useEffect(() => {
-    fetch('/api/admin/user-list?limit=0&offset=0', {
+    fetch('/api/admin/user-list', {
       headers: { Authorization: `Bearer ${getToken()}` },
     })
       .then(r => r.ok ? r.json() : { projects: [] })

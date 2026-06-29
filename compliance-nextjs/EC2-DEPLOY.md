@@ -200,20 +200,18 @@ Fill in the required values:
 
 | Variable | What to put |
 |---|---|
-| `SQLITE_DB_PATH` | Absolute path for the SQLite DB — **required** to survive redeploys (see below) |
+| `MONGODB_URI` | MongoDB connection string — **required** for runtime storage |
 | `STORAGE_IMAGE_BASE_URL` | `https://your-domain.com/api/images/` |
 | `AWS_S3_BUCKET` | Your S3 bucket name, e.g. `my-compliance-images` |
 | `JWT_SECRET` | Output of `openssl rand -hex 32` |
 | `GEMINI_API_KEY` | Your AI API key |
 | `CHATGPT_API_KEY` | Your AI API key |
 
-> **`SQLITE_DB_PATH` — critical for data persistence.**  
-> Without an absolute path the SQLite file resolves to `./data/compliance.db` relative to `process.cwd()`.  
-> On a standalone Next.js build the working directory can change between restarts, causing the DB to be  
-> created in `.next/standalone/data/` which **gets wiped on every `npm run build`**.  
-> Set it to the absolute path of a directory that is **outside** the `.next/` folder:
+> **`MONGODB_URI` is required.**  
+> SQLite runtime storage has been removed from this app, so production must point at a MongoDB instance or cluster:
 > ```env
-> SQLITE_DB_PATH=/home/ubuntu/compliance-check/compliance-nextjs/data/compliance.db
+> MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/compliance
+> MONGODB_DB_NAME=compliance
 > ```
 
 > **AWS credentials — do not add them.**  
@@ -540,7 +538,7 @@ If this fails, the IAM role isn't attached correctly (Step 6).
 
 | Data | Path |
 |---|---|
-| **SQLite database** | Value of `SQLITE_DB_PATH` — e.g. `.../data/compliance.db` |
+| **MongoDB** | Database referenced by `MONGODB_URI` / `MONGODB_DB_NAME` |
 | Submissions JSON (legacy) | `/home/ubuntu/compliance-app/compliance-nextjs/data/submissions.json` |
 | Admin credentials (legacy) | `/home/ubuntu/compliance-app/compliance-nextjs/data/admins.json` |
 | Tracking Excel | `/home/ubuntu/compliance-app/compliance-nextjs/data/tracking.xlsx` |

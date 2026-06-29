@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { COOKIE_NAME, extractBearerToken, verifyToken } from '@/lib/auth/jwt';
 import { findByUsername, saveAdmin } from '@/lib/db/admin-repo';
-import { runMigrations } from '@/lib/db/migrate';
+import { ensureDbReady } from '@/lib/db/bootstrap';
 
 function resolveToken(req: NextRequest): string | null {
   const headerToken = extractBearerToken(req.headers.get('authorization'));
@@ -12,7 +12,7 @@ function resolveToken(req: NextRequest): string | null {
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  await runMigrations();
+  await ensureDbReady();
 
   try {
     const token = resolveToken(req);
