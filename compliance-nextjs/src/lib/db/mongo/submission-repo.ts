@@ -76,6 +76,13 @@ export async function findById(id: number): Promise<Submission | null> {
   return doc ? docToSubmission(doc) : null;
 }
 
+export async function findByIds(ids: number[]): Promise<Submission[]> {
+  if (ids.length === 0) return [];
+  const c = await col();
+  const docs = await c.find({ numericId: { $in: ids } }).toArray();
+  return docs.map(docToSubmission);
+}
+
 export async function save(submission: Submission): Promise<Submission> {
   const c = await col();
 

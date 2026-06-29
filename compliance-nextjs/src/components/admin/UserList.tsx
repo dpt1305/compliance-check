@@ -950,58 +950,16 @@ export default function UserList() {
         return;
       }
 
-      // Fetch all filtered items (no pagination limit) for ZIP export
-      const allParams = new URLSearchParams();
-      allParams.set("offset", "0");
-      allParams.set("limit", "99999");
-      if (filterProjects !== null)
-        filterProjects.forEach((p) => allParams.append("project", p));
-      if (hasP) {
-        allParams.set("month", String(month));
-        allParams.set("year", String(year));
-      }
-      filterTags.forEach((t) => allParams.append("tag", t));
-      const allRes = await fetch(`/api/admin/user-list?${allParams}`, {
-        headers: authHeaders(),
-      });
-      if (!allRes.ok) {
-        showToast("Failed to fetch filter data", false);
-        return;
-      }
-      const allData = (await allRes.json()) as { items: UserListEntry[] };
-      const sortedAll = [...allData.items].sort((a, b) =>
-        compareUserListRows(a, b, sortCol, sortDir),
-      );
-      const members = sortedAll.map((row, idx) => ({
-        no: idx + 1,
-        name: row.name,
-        trackingRowNum: row.trackingRowNum,
-        account: row.trackingAccount ?? row.account,
-        submissionId: row.submissionId,
-        project: row.project,
-        email: row.email,
-        serial: row.serial ?? row.deviceSerial,
-        deviceType: row.deviceType ?? row.submissionType,
-        malwareAlerts: row.malwareAlerts,
-        complianceChecks: row.complianceChecks,
-        seedConfiguration: row.seedConfiguration,
-        operatingSystem: row.operatingSystem,
-        followUpAction: row.followUpAction,
-        responseFromTicket: row.responseFromTicket,
-      }));
-
-      if (members.length === 0) {
-        showToast("No members match the current filter", false);
-        return;
-      }
-
       const res = await fetch("/api/admin/tracking", {
         method: "POST",
         headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
+          projects: filterProjects,
           month: hasP ? month : undefined,
           year: hasP ? year : undefined,
-          members,
+          tags: filterTags,
+          sortCol,
+          sortDir,
         }),
       });
       if (!res.ok) {
