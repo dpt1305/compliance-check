@@ -3,13 +3,14 @@ import path from 'path';
 import AdmZip from 'adm-zip';
 import { NextRequest, NextResponse } from 'next/server';
 import ExcelJS from 'exceljs';
+import { exportFollowUpAction, exportIssueCount } from '@/lib/services/excel-export';
 import { trackingFilePath } from '@/lib/utils/tracking-path';
 import { readTrackingRows } from '@/lib/services/tracking-reader';
 import { findAll } from '@/lib/db/submission-repo';
 import type { Submission } from '@/lib/storage/json-storage';
+import { buildSubmissionMatchIndex, getMatchesForTrackingRow } from '@/lib/services/admin-user-list';
 import { readAll as readTrackingDB, readActive as readActiveTrackingDB, replaceAll, mergeFromUpload, updateSeedFields } from '@/lib/db/tracking-repo';
 import type { TrackingMember } from '@/lib/db/tracking-repo';
-import { matchesTrackingRow } from '@/lib/db/tracking-repo';
 import { bumpTrackingVersionAsync as bumpTrackingVersion } from '@/lib/db/index';
 import { getImageBuffer } from '@/lib/utils/file-storage';
 
@@ -56,26 +57,11 @@ function buildRowStatusMap(
   trackingRows: TrackingMember[],
   submissions: Submission[],
 ): Map<number, string> {
-  // Parse AI identifiers from each submission's validationResult (same as user-list route)
-  const parsedSubs = submissions.map(s => {
-    let deviceSerial: string | null = s.deviceSerial ?? null;
-    let deviceName: string | null = s.deviceName ?? null;
-    if (!deviceSerial || !deviceName) {
-      try {
-        const r = JSON.parse(s.validationResult ?? '{}') as { deviceSerial?: string; deviceName?: string };
-        deviceSerial ??= r.deviceSerial ?? null;
-        deviceName   ??= r.deviceName  ?? null;
-      } catch { /* ignore */ }
-    }
-    return { ...s, deviceSerial, deviceName };
-  });
-
+  const matchIndex = buildSubmissionMatchIndex(submissions);
   const result = new Map<number, string>();
 
   for (const row of trackingRows) {
-    const matches = parsedSubs.filter(s =>
-      matchesTrackingRow(row, s.deviceSerial, s.deviceName, s.account)
-    );
+    const matches = getMatchesForTrackingRow(row, matchIndex);
     if (matches.length === 0) continue;
 
     // Pick most recent submission; APPROVED beats any other status
@@ -175,8 +161,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   for (const r of rows) {
     sheet.addRow([
       r.no ?? '', r.project ?? '', r.name ?? '', r.account ?? '', r.email ?? '', r.serial ?? '',
-      r.deviceType ?? '', r.malwareAlerts ?? '', r.complianceChecks ?? '',
-      r.seedConfiguration ?? '', r.operatingSystem ?? '', r.followUpAction ?? '',
+      r.deviceType ?? '', exportIssueCount(r.malwareAlerts), exportIssueCount(r.complianceChecks),
+      exportIssueCount(r.seedConfiguration), exportIssueCount(r.operatingSystem), exportFollowUpAction(r.followUpAction),
       'Refer photo captured in folder',
       deriveTrackingStatus(rowIdToStatus.get(r.id)),
       '',
@@ -301,11 +287,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             row?.email ?? member.email ?? '',
             row?.serial ?? member.serial ?? '',
             row?.deviceType ?? member.deviceType ?? sub?.submissionType ?? '',
-            row?.malwareAlerts ?? member.malwareAlerts ?? sub?.malwareAlerts ?? '',
-            row?.complianceChecks ?? member.complianceChecks ?? sub?.complianceCheck ?? '',
-            row?.seedConfiguration ?? member.seedConfiguration ?? sub?.seedConfiguration ?? '',
-            row?.operatingSystem ?? member.operatingSystem ?? sub?.operatingSystem ?? '',
-            row?.followUpAction ?? member.followUpAction ?? '',
+            exportIssueCount(row?.malwareAlerts ?? member.malwareAlerts ?? sub?.malwareAlerts),
+            exportIssueCount(row?.complianceChecks ?? member.complianceChecks ?? sub?.complianceCheck),
+            exportIssueCount(row?.seedConfiguration ?? member.seedConfiguration ?? sub?.seedConfiguration),
+            exportIssueCount(row?.operatingSystem ?? member.operatingSystem ?? sub?.operatingSystem),
+            exportFollowUpAction(row?.followUpAction ?? member.followUpAction),
             row?.responseFromTicket ?? member.responseFromTicket ?? 'Refer photo captured in folder',
             deriveTrackingStatus(sub?.status),
             '',

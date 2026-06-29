@@ -8,6 +8,18 @@ export function exportStatus(row: UserListEntry): string {
   return '';
 }
 
+export function exportIssueCount(value: string | null | undefined): string {
+  const trimmed = value?.trim() ?? '';
+  if (!trimmed) return '';
+  const actionCount = trimmed.match(/^(\d+)\s*actions?$/i);
+  return actionCount ? actionCount[1] : trimmed;
+}
+
+export function exportFollowUpAction(value: string | null | undefined): string {
+  const trimmed = value?.trim() ?? '';
+  return trimmed || 'No action required';
+}
+
 export async function generateReport(entries: UserListEntry[]): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('Compliance');
@@ -53,11 +65,11 @@ export async function generateReport(entries: UserListEntry[]): Promise<Buffer> 
       email: row.email ?? '',
       serial: row.serial ?? row.deviceSerial ?? '',
       deviceType: row.deviceType ?? row.submissionType ?? '',
-      malwareAlerts: row.malwareAlerts ?? '',
-      complianceChecks: row.complianceChecks ?? '',
-      seedConfiguration: row.seedConfiguration ?? '',
-      operatingSystem: row.operatingSystem ?? '',
-      followUpAction: row.followUpAction ?? '',
+      malwareAlerts: exportIssueCount(row.malwareAlerts),
+      complianceChecks: exportIssueCount(row.complianceChecks),
+      seedConfiguration: exportIssueCount(row.seedConfiguration),
+      operatingSystem: exportIssueCount(row.operatingSystem),
+      followUpAction: exportFollowUpAction(row.followUpAction),
       evdTicket: row.responseFromTicket ?? 'Refer photo captured in folder',
       status: exportStatus(row),
       note: '',

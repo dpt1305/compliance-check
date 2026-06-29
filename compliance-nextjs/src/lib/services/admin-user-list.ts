@@ -4,7 +4,9 @@ import {
   readActive,
   matchesTrackingRow,
   getDistinctProjects,
+  type TrackingMember,
 } from '@/lib/db/tracking-repo';
+import type { Submission } from '@/lib/storage/json-storage';
 
 export interface UserListEntry {
   source: 'tracking' | 'submission' | 'both';
@@ -90,6 +92,118 @@ function normStr(v: string | null | undefined) {
   return (v ?? '').trim().toLowerCase();
 }
 
+export type ParsedSubmission = Omit<Submission, 'deviceSerial' | 'deviceName'> & {
+  deviceSerial: string | null;
+  deviceName: string | null;
+};
+
+interface SubmissionMatchIndex {
+  parsedSubmissions: ParsedSubmission[];
+  submissionsWithAccount: ParsedSubmission[];
+  bySerial: Map<string, ParsedSubmission[]>;
+  byDeviceName: Map<string, ParsedSubmission[]>;
+  byAccount: Map<string, ParsedSubmission[]>;
+}
+
+function addToIndex(
+  index: Map<string, ParsedSubmission[]>,
+  key: string | null | undefined,
+  submission: ParsedSubmission,
+) {
+  const normalized = normStr(key);
+  if (!normalized) return;
+  const existing = index.get(normalized);
+  if (existing) {
+    existing.push(submission);
+  } else {
+    index.set(normalized, [submission]);
+  }
+}
+
+export function parseSubmissionIdentifiers(submissions: Submission[]): ParsedSubmission[] {
+  return submissions.map(submission => {
+    let deviceSerial: string | null = submission.deviceSerial ?? null;
+    let deviceName: string | null = submission.deviceName ?? null;
+    if (!deviceSerial || !deviceName) {
+      try {
+        const parsed = JSON.parse(submission.validationResult ?? '{}') as {
+          deviceSerial?: string;
+          deviceName?: string;
+        };
+        deviceSerial ??= parsed.deviceSerial ?? null;
+        deviceName ??= parsed.deviceName ?? null;
+      } catch {
+        // ignore invalid JSON
+      }
+    }
+    return { ...submission, deviceSerial, deviceName };
+  });
+}
+
+export function buildSubmissionMatchIndex(submissions: Submission[]): SubmissionMatchIndex {
+  const parsedSubmissions = parseSubmissionIdentifiers(submissions);
+  const bySerial = new Map<string, ParsedSubmission[]>();
+  const byDeviceName = new Map<string, ParsedSubmission[]>();
+  const byAccount = new Map<string, ParsedSubmission[]>();
+
+  for (const submission of parsedSubmissions) {
+    addToIndex(bySerial, submission.deviceSerial, submission);
+    addToIndex(byDeviceName, submission.deviceName, submission);
+    addToIndex(byAccount, submission.account, submission);
+  }
+
+  return {
+    parsedSubmissions,
+    submissionsWithAccount: parsedSubmissions.filter(submission => !!normStr(submission.account)),
+    bySerial,
+    byDeviceName,
+    byAccount,
+  };
+}
+
+export function getMatchesForTrackingRow(
+  row: Pick<TrackingMember, 'serial' | 'name' | 'account' | 'email'>,
+  index: SubmissionMatchIndex,
+  excludeSubmissionIds?: Set<number>,
+): ParsedSubmission[] {
+  const candidateMap = new Map<number, ParsedSubmission>();
+
+  const addCandidate = (candidate: ParsedSubmission) => {
+    if (excludeSubmissionIds?.has(candidate.id)) return;
+    candidateMap.set(candidate.id, candidate);
+  };
+
+  const addCandidates = (candidates?: ParsedSubmission[]) => {
+    if (!candidates) return;
+    for (const candidate of candidates) addCandidate(candidate);
+  };
+
+  addCandidates(index.bySerial.get(normStr(row.serial)));
+  addCandidates(index.byDeviceName.get(normStr(row.name)));
+  addCandidates(index.byAccount.get(normStr(row.account)));
+  addCandidates(index.byAccount.get(normStr(row.email)));
+  addCandidates(index.byAccount.get(normStr(row.name)));
+
+  if (candidateMap.size === 0) {
+    const serialNorm = normStr(row.serial);
+    const emailNorm = normStr(row.email);
+    for (const submission of index.submissionsWithAccount) {
+      const accountNorm = normStr(submission.account);
+      if (!accountNorm) continue;
+      if (
+        (serialNorm && serialNorm.includes(accountNorm)) ||
+        (emailNorm && emailNorm.includes(accountNorm))
+      ) {
+        addCandidate(submission);
+      }
+    }
+  }
+
+  return [...candidateMap.values()].filter(submission =>
+    matchesTrackingRow(row as TrackingMember, submission.deviceSerial, submission.deviceName, submission.account),
+  );
+}
+
 function pickBest<T extends { id: number; submissionDate: string }>(list: T[]): T {
   return list.slice().sort((a, b) =>
     new Date(b.submissionDate).getTime() - new Date(a.submissionDate).getTime()
@@ -148,21 +262,7 @@ export async function buildUserListEntries(): Promise<UserListEntry[]> {
     findAll(),
     readAll(),
   ]);
-
-  const parsedSubs = submissions.map(s => {
-    let deviceSerial: string | null = s.deviceSerial ?? null;
-    let deviceName: string | null = s.deviceName ?? null;
-    if (!deviceSerial || !deviceName) {
-      try {
-        const r = JSON.parse(s.validationResult ?? '{}') as { deviceSerial?: string; deviceName?: string };
-        deviceSerial ??= r.deviceSerial ?? null;
-        deviceName ??= r.deviceName ?? null;
-      } catch {
-        // ignore invalid JSON
-      }
-    }
-    return { ...s, deviceSerial, deviceName };
-  });
+  const matchIndex = buildSubmissionMatchIndex(submissions);
 
   const entries: UserListEntry[] = [];
   const matchedSubmissionIds = new Set<number>();
@@ -175,10 +275,7 @@ export async function buildUserListEntries(): Promise<UserListEntry[]> {
   }
 
   for (const row of trackingRows) {
-    const allMatches = parsedSubs.filter(s =>
-      !matchedSubmissionIds.has(s.id) &&
-      matchesTrackingRow(row, s.deviceSerial, s.deviceName, s.account)
-    );
+    const allMatches = getMatchesForTrackingRow(row, matchIndex, matchedSubmissionIds);
 
     if (allMatches.length > 0) {
       for (const match of allMatches) matchedSubmissionIds.add(match.id);
@@ -236,7 +333,7 @@ export async function buildUserListEntries(): Promise<UserListEntry[]> {
     });
   }
 
-  for (const submission of parsedSubs) {
+  for (const submission of matchIndex.parsedSubmissions) {
     if (matchedSubmissionIds.has(submission.id)) continue;
 
     const normAccount = normStr(submission.account);
