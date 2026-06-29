@@ -10,7 +10,7 @@ export const runtime = 'nodejs';
  * POST /api/attendance
  *
  * Receives an attendance record from an external attendance system and persists
- * it to the local SQLite database.
+ * it to the application database.
  *
  * Authentication:
  *   Set ATTENDANCE_API_KEY in .env to require `x-api-key: <key>` on every request.

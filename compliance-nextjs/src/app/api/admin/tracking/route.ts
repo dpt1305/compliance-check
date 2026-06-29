@@ -119,7 +119,7 @@ function sanitizeName(name: string): string {
 export async function GET(_req: NextRequest): Promise<NextResponse> {
   const rows = await readActiveTrackingDB();
   if (rows.length === 0) {
-    // Fall back to disk file if DB is empty (migration hasn't run yet)
+    // Fall back to disk file if no tracking rows are available in the active data store yet.
     const diskPath = trackingFilePath();
     if (fs.existsSync(diskPath)) {
       const buf = fs.readFileSync(diskPath);

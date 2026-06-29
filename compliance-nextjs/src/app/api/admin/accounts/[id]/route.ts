@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { findAll, findByUsername, saveAdmin, deleteAdmin } from '@/lib/db/admin-repo';
-import { runMigrations } from '@/lib/db/migrate';
+import { ensureDbReady } from '@/lib/db/bootstrap';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +21,7 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
-  await runMigrations();
+  await ensureDbReady();
   try {
     const { id } = await params;
     const allAdmins = await findAll();
@@ -85,7 +85,7 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
-  await runMigrations();
+  await ensureDbReady();
   try {
     const { id } = await params;
     const allAdmins = await findAll();
