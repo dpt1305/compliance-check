@@ -1983,6 +1983,7 @@ export default function UserList() {
       {/* Table */}
       <div
         className="card overflow-x-auto relative"
+        style={isLoading ? { minHeight: 260 } : undefined}
         aria-busy={isLoading}
       >
         {/* Full-table loading overlay: blocks all interaction while reloading */}
