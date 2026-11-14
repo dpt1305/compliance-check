@@ -10,7 +10,7 @@ Deploy the compliance app on an AWS EC2 t2.micro instance using PM2 (process man
 Internet → Domain (DNS A record → EC2 IP)
          → Nginx :80 / :443 (SSL termination)
          → PM2 → Next.js :3000
-         → S3 (image storage)
+         → Cloudflare R2 (image storage)
          → /home/ubuntu/compliance-app/data/ (JSON + tracking.xlsx)
 ```
 
@@ -34,8 +34,7 @@ Internet → Domain (DNS A record → EC2 IP)
    | HTTPS | 443 | 0.0.0.0/0, ::/0 | Secure web traffic |
 
 7. **Storage**: 20 GB gp3 (increase from default 8 GB — build artifacts take space)
-8. **Advanced → IAM Instance Profile**: select `ComplianceEC2Role`
-   *(See S3 setup in [S3 section](#optional-s3-for-image-storage) if you need this)*
+8. **Advanced → IAM Instance Profile**: not needed (images are stored in Cloudflare R2, see Part 2)
 9. Click **Launch Instance**
 
 ### Step 2 — Allocate an Elastic IP
@@ -74,51 +73,24 @@ nslookup compliance.your-domain.com
 
 ---
 
-## Part 2 — S3 Setup (for image storage)
+## Part 2 — Cloudflare R2 Setup (for image storage)
 
-Skip this section if you want images stored on disk instead. Set `AWS_S3_BUCKET=` empty in your `.env` to use local storage.
+Skip this section if you want images stored on disk instead. Leave `R2_BUCKET=` empty in your `.env` to use local storage.
 
-### Step 4 — Create S3 bucket
+### Step 4 — Create the R2 bucket
 
-1. **S3 → Create bucket**
-2. **Name**: e.g. `my-compliance-images` (globally unique)
-3. **Region**: same as your EC2 (e.g. `ap-southeast-1`)
-4. **Block all public access**: ✅ keep ON (images serve via presigned URLs)
-5. Create bucket
+1. **Cloudflare dashboard → R2 → Create bucket** (e.g. `my-compliance-images`)
+2. Keep the bucket **private** (images are served through the app via presigned URLs)
+3. Objects must live under `images/<image name>` — the same keys as the old S3 bucket
 
-### Step 5 — Create IAM policy
+### Step 5 — Create an R2 API token
 
-1. **IAM → Policies → Create policy → JSON tab**, paste:
+1. **R2 → Manage API tokens → Create API token**
+2. Permission: **Object Read & Write** scoped to this bucket
+   (use **Admin Read & Write** if you want the app to set the TTL lifecycle rule itself)
+3. Copy the **Access Key ID**, **Secret Access Key** and your **Account ID** into `.env.production`
 
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": ["s3:PutObject", "s3:GetObject", "s3:DeleteObject", "s3:ListBucket"],
-      "Resource": [
-        "arn:aws:s3:::my-compliance-images",
-        "arn:aws:s3:::my-compliance-images/*"
-      ]
-    }
-  ]
-}
-```
-
-2. Name it `ComplianceS3Policy` → Create
-
-### Step 6 — Create IAM Role for EC2
-
-1. **IAM → Roles → Create role**
-2. Trusted entity: **AWS service → EC2**
-3. Attach `ComplianceS3Policy`
-4. Name it `ComplianceEC2Role` → Create
-
-5. Attach the role to your running instance:
-   **EC2 → Instances → select your instance → Actions → Security → Modify IAM role → ComplianceEC2Role → Update**
-
-> With an IAM Role, the server gets S3 credentials automatically. You do **not** need `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY` in your `.env` file.
+> The EC2 IAM Role (`ComplianceEC2Role`) is no longer needed for image storage.
 
 ---
 
@@ -191,7 +163,7 @@ npm ci
 ### Step 13 — Create environment file
 
 ```bash
-# Use the production-specific template (no AWS credentials — IAM Role handles that)
+# Use the production-specific template
 cp .env.production.example .env.production
 nano .env.production
 ```
@@ -202,7 +174,9 @@ Fill in the required values:
 |---|---|
 | `MONGODB_URI` | MongoDB connection string — **required** for runtime storage |
 | `STORAGE_IMAGE_BASE_URL` | `https://your-domain.com/api/images/` |
-| `AWS_S3_BUCKET` | Your S3 bucket name, e.g. `my-compliance-images` |
+| `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | From Cloudflare R2 → Manage API tokens |
+| `R2_BUCKET` | Your R2 bucket name, e.g. `my-compliance-images` |
+| `R2_PREFIX` | `images` (keep the same as the old S3 prefix) |
 | `JWT_SECRET` | Output of `openssl rand -hex 32` |
 | `GEMINI_API_KEY` | Your AI API key |
 | `CHATGPT_API_KEY` | Your AI API key |
@@ -214,10 +188,9 @@ Fill in the required values:
 > MONGODB_DB_NAME=compliance
 > ```
 
-> **AWS credentials — do not add them.**  
-> `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are intentionally absent from `.env.production`.  
-> The IAM Role attached to the EC2 instance (Step 6) provides credentials automatically.  
-> The AWS SDK checks the EC2 instance metadata service (IMDS) as a fallback when no keys are present.
+> **R2 credentials are required.**  
+> Unlike AWS S3, R2 has no instance-role fallback: set `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID` and
+> `R2_SECRET_ACCESS_KEY` in `.env.production` (never commit them).
 
 Generate a secure JWT secret:
 ```bash
@@ -511,12 +484,13 @@ export NODE_OPTIONS="--max-old-space-size=512"
 npm run build
 ```
 
-**Images not loading from S3** — verify IAM role is attached:
+**Images not loading from R2** — verify the R2 credentials and that objects exist under the prefix:
 ```bash
-# On EC2, test S3 access
-aws s3 ls s3://my-compliance-images/ --region ap-southeast-1
+# On EC2, test R2 access (rclone remote "r2" or aws cli with --endpoint-url)
+aws s3 ls s3://my-compliance-images/images/ \
+  --endpoint-url https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com
 ```
-If this fails, the IAM role isn't attached correctly (Step 6).
+If this fails, check `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` in `.env.production`.
 
 **SSL certificate fails** — ensure port 80 is open in Security Group and DNS A record is pointing to your Elastic IP.
 
@@ -542,13 +516,11 @@ If this fails, the IAM role isn't attached correctly (Step 6).
 | Submissions JSON (legacy) | `/home/ubuntu/compliance-app/compliance-nextjs/data/submissions.json` |
 | Admin credentials (legacy) | `/home/ubuntu/compliance-app/compliance-nextjs/data/admins.json` |
 | Tracking Excel | `/home/ubuntu/compliance-app/compliance-nextjs/data/tracking.xlsx` |
-| Images | S3 bucket `my-compliance-images/images/` |
+| Images | Cloudflare R2 bucket `my-compliance-images/images/` |
 | PM2 logs | `~/.pm2/logs/` |
 
-Back up the `data/` directory regularly:
+Back up the `data/` directory regularly (R2 via rclone, remote `r2` configured with your R2 endpoint):
 ```bash
-# Quick backup to S3
-aws s3 cp --recursive \
-  /home/ubuntu/compliance-app/compliance-nextjs/data/ \
-  s3://my-compliance-images/backups/data-$(date +%Y%m%d)/
+rclone copy /home/ubuntu/compliance-app/compliance-nextjs/data/ \
+  r2:my-compliance-images/backups/data-$(date +%Y%m%d)/
 ```

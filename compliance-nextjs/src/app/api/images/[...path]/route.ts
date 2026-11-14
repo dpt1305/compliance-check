@@ -35,7 +35,7 @@ export async function GET(
     });
   }
 
-  // View mode: redirect to presigned S3 URL (zero proxying overhead)
+  // View mode: redirect to presigned R2 URL (zero proxying overhead)
   const presigned = await getPresignedUrl(filename);
   if (presigned) {
     return NextResponse.redirect(presigned, { status: 302 });
