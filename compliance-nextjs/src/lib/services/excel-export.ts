@@ -16,10 +16,17 @@ export function exportIssueCount(value: string | null | undefined): string {
   return actionCount ? actionCount[1] : trimmed;
 }
 
-export function exportFollowUpAction(value: string | null | undefined): string {
-  const trimmed = value?.trim() ?? '';
-  if (!trimmed || /^0\s*actions?$/i.test(trimmed)) return 'No actions required';
-  return trimmed;
+export const DEFAULT_FOLLOW_UP_ACTION = 'No actions required';
+export const DEFAULT_EVD_TICKET = 'Refer photo captured in folder';
+
+// Always export the standard default, regardless of variants stored in tracking data
+// (e.g. "No action require", "No action needed", "Default").
+export function exportFollowUpAction(_value?: string | null): string {
+  return DEFAULT_FOLLOW_UP_ACTION;
+}
+
+export function exportEvdTicket(_value?: string | null): string {
+  return DEFAULT_EVD_TICKET;
 }
 
 export async function generateReport(entries: UserListEntry[]): Promise<Buffer> {
@@ -46,8 +53,8 @@ export async function generateReport(entries: UserListEntry[]): Promise<Buffer> 
 
   const headerRow = sheet.getRow(1);
   headerRow.eachCell(cell => {
-    cell.font = { bold: true };
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF008000' } };
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF006400' } };
     cell.alignment = { vertical: 'middle', horizontal: 'center' };
     cell.border = {
       top: { style: 'thin' },
@@ -72,7 +79,7 @@ export async function generateReport(entries: UserListEntry[]): Promise<Buffer> 
       seedConfiguration: exportIssueCount(row.seedConfiguration),
       operatingSystem: exportIssueCount(row.operatingSystem),
       followUpAction: exportFollowUpAction(row.followUpAction),
-      evdTicket: row.responseFromTicket ?? 'Refer photo captured in folder',
+      evdTicket: exportEvdTicket(row.responseFromTicket),
       status: exportStatus(row),
       note: '',
     });

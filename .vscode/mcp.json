@@ -1,0 +1,38 @@
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "slack-bot-token",
+      "description": "Slack Bot User OAuth Token (xoxb-...)",
+      "password": true
+    },
+    {
+      "type": "promptString",
+      "id": "slack-team-id",
+      "description": "Slack Team ID (starts with T)"
+    },
+    {
+      "type": "promptString",
+      "id": "slack-channel-ids",
+      "description": "Optional comma-separated Slack channel IDs to limit access",
+      "default": ""
+    }
+  ],
+  "servers": {
+    "slack": {
+      "type": "stdio",
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "@zencoderai/slack-mcp-server"
+      ],
+      "env": {
+        "SLACK_BOT_TOKEN": "${input:slack-bot-token}",
+        "SLACK_TEAM_ID": "${input:slack-team-id}",
+        "SLACK_CHANNEL_IDS": "${input:slack-channel-ids}"
+      }
+    }
+  }
+}
