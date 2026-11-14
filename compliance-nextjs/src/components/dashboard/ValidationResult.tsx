@@ -1,6 +1,7 @@
 'use client';
 
 interface AiResult {
+  title?: string;
   valid?: boolean;
   matchesType?: boolean;
   confidence?: number;
@@ -76,7 +77,7 @@ export default function ValidationResult({ result, memberRow }: Props) {
         <span className="text-2xl">{isApproved ? '✅' : '❌'}</span>
         <div>
           <div className={`font-semibold ${isApproved ? 'text-green-800' : 'text-red-800'}`}>
-            {isApproved ? 'Image Accepted — Pending Approval' : 'Image Not Valid'}
+            {isApproved ? 'Image Accepted — Pending Approval' : (aiResult?.title ?? 'Image Not Valid')}
           </div>
           <div className="text-sm text-gray-600 capitalize">Type: {result.submissionType}</div>
         </div>
@@ -165,7 +166,7 @@ export default function ValidationResult({ result, memberRow }: Props) {
             {aiResult?.failedChecks && aiResult.failedChecks.length > 0 && (
               <div>
                 <div className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
-                  <span>📋</span> Failed requirements:
+                  <span>📋</span> What went wrong and how to fix it:
                 </div>
                 <div className="space-y-2">
                   {aiResult.failedChecks.map((check, i) => (
@@ -191,7 +192,7 @@ export default function ValidationResult({ result, memberRow }: Props) {
         {aiResult?.suggestion && (
           <div className="mt-4 pt-4 border-t border-gray-200 flex items-start gap-2 text-sm text-gray-700">
             <span>💡</span>
-            <span><strong>Tip:</strong> {aiResult.suggestion}</span>
+            <span><strong>{isApproved ? 'Tip:' : 'Next step:'}</strong> {aiResult.suggestion}</span>
           </div>
         )}
       </div>

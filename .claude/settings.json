@@ -3,6 +3,6 @@
         "NODE_TLS_REJECT_UNAUTHORIZED": "0"
     },
     "permissions": {
-        "allow": ["*"]
+        "allow": []
     }
 }

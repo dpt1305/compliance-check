@@ -7,6 +7,7 @@ import {
   type TrackingMember,
 } from '@/lib/db/tracking-repo';
 import type { Submission } from '@/lib/storage/json-storage';
+import { buildProjectMatcher, dedupeProjects } from '@/lib/utils/project-filter';
 
 export interface UserListEntry {
   source: 'tracking' | 'submission' | 'both';
@@ -204,10 +205,17 @@ export function getMatchesForTrackingRow(
   );
 }
 
-function pickBest<T extends { id: number; submissionDate: string }>(list: T[]): T {
-  return list.slice().sort((a, b) =>
-    new Date(b.submissionDate).getTime() - new Date(a.submissionDate).getTime()
-  )[0];
+/**
+ * Representative submission for a member: an APPROVED one always wins (so an admin
+ * approval is never hidden by a later duplicate/resubmission); otherwise the most recent.
+ */
+function pickBest<T extends { id: number; status?: string; submissionDate: string }>(list: T[]): T {
+  const isApproved = (s: T) => s.status?.toUpperCase() === 'APPROVED';
+  return list.slice().sort((a, b) => {
+    const approvedDiff = Number(isApproved(b)) - Number(isApproved(a));
+    if (approvedDiff !== 0) return approvedDiff;
+    return new Date(b.submissionDate).getTime() - new Date(a.submissionDate).getTime();
+  })[0];
 }
 
 function sortValue(row: UserListEntry, col: string): string {
@@ -378,8 +386,9 @@ export function filterUserListEntries(entries: UserListEntry[], query: UserListQ
   const hasPeriod = month !== null && year !== null && month >= 1 && month <= 12 && year > 0;
 
   let result = entries;
-  if (filterProjects !== null) {
-    result = result.filter(row => filterProjects.includes(row.project ?? ''));
+  const matchesProject = buildProjectMatcher(filterProjects);
+  if (matchesProject) {
+    result = result.filter(row => matchesProject(row.project));
   }
 
   if (hasPeriod) {
@@ -400,10 +409,8 @@ export function filterUserListEntries(entries: UserListEntry[], query: UserListQ
   }
 
   if (callerRole === 'Teamlead' && callerTeams.length > 0) {
-    result = result.filter(row => {
-      const project = (row.project ?? '').trim().toLowerCase();
-      return callerTeams.some(team => team.trim().toLowerCase() === project);
-    });
+    const inScope = buildProjectMatcher(callerTeams)!;
+    result = result.filter(row => inScope(row.project));
   } else if (callerRole === 'Teamlead' && callerTeams.length === 0) {
     result = [];
   }
@@ -427,7 +434,7 @@ export async function getUserListData(query: UserListQuery = {}): Promise<UserLi
 
   const total = result.length;
   const items = limit === undefined ? result.slice(offset) : result.slice(offset, offset + limit);
-  const projects = await getDistinctProjects();
+  const projects = dedupeProjects(await getDistinctProjects());
   const summary = {
     approved: result.filter(row => row.submissionStatus === 'APPROVED').length,
     submitted: result.filter(row => row.submissionStatus && row.submissionStatus !== 'NOT_SUBMITTED').length,

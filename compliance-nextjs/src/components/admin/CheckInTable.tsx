@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import MultiSelectDropdown from './MultiSelectDropdown';
-import { useAdminEvents } from '@/hooks/useAdminEvents';
+import { useAutoRefresh, isTypingInField } from '@/hooks/useAutoRefresh';
+import { buildProjectMatcher, dedupeProjects } from '@/lib/utils/project-filter';
 
 type Status = 'PENDING' | 'APPROVED' | 'REJECTED';
 type CellStatus = Status | 'MISSING';
@@ -34,25 +35,26 @@ export default function CheckInTable() {
 
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 3000); }
 
-  const loadData = useCallback(async () => {
-    setIsLoading(true);
+  const loadData = useCallback(async (silent = false) => {
+    if (!silent) setIsLoading(true);
     try {
       const res = await fetch('/api/admin/checkin-table', {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (!res.ok) throw new Error('Failed');
       setEntries(await res.json() as CheckInEntry[]);
-    } catch { showToast('Failed to load check-in table'); }
-    finally { setIsLoading(false); }
+    } catch { if (!silent) showToast('Failed to load check-in table'); }
+    finally { if (!silent) setIsLoading(false); }
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Real-time updates via SSE — reloads whenever tracking or submission data changes.
-  useAdminEvents({ onTracking: loadData, onSubmissions: loadData });
+  // Background refresh once a minute (skipped while typing in a field).
+  useAutoRefresh(() => loadData(true), { isBusy: isTypingInField });
 
+  const matchesProject = buildProjectMatcher(projectFilter);
   const filteredEntries = entries.filter(e => {
-    if (projectFilter !== null && !projectFilter.includes(e.project ?? '')) return false;
+    if (matchesProject && !matchesProject(e.project)) return false;
     if (statusFilter && e.status !== statusFilter) return false;
     if (dateFrom && e.submissionDate < dateFrom) return false;
     if (dateTo && e.submissionDate > dateTo + 'T23:59:59') return false;
@@ -62,7 +64,7 @@ export default function CheckInTable() {
   const accounts = [...new Set(filteredEntries.map(e => e.account))].sort();
   const types = [...new Set(filteredEntries.map(e => e.submissionType))].sort();
   const allTypes = [...new Set(entries.map(e => e.submissionType))].sort();
-  const availableProjects = [...new Set(entries.map(e => e.project ?? '').filter(Boolean))].sort();
+  const availableProjects = dedupeProjects(entries.map(e => e.project));
 
   const matrix: Record<string, Record<string, CheckInEntry>> = {};
   for (const e of filteredEntries) {
@@ -93,6 +95,7 @@ export default function CheckInTable() {
           selected={projectFilter}
           onChange={setProjectFilter}
           placeholder="All projects"
+          emptyMeansAll
           className="w-48"
         />
         <select className="form-select w-40" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
@@ -104,7 +107,7 @@ export default function CheckInTable() {
         <button onClick={() => { setProjectFilter(null); setStatusFilter(''); setDateFrom(''); setDateTo(''); }} className="btn-secondary text-sm">
           🧹 Clear
         </button>
-        <button onClick={loadData} disabled={isLoading} className="btn-secondary text-sm">
+        <button onClick={() => loadData()} disabled={isLoading} className="btn-secondary text-sm">
           {isLoading ? <span className="spinner w-4 h-4 border-gray-400"></span> : '🔄'}
         </button>
       </div>

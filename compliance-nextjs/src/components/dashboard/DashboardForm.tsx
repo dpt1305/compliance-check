@@ -92,6 +92,75 @@ async function validateFile(file: File): Promise<FileError | null> {
   return null;
 }
 
+interface ErrorBody {
+  message?: string;
+  title?: string;
+  reason?: string;
+  failedChecks?: string[];
+  guidelines?: string[];
+  suggestion?: string;
+}
+
+/**
+ * Turn any failed request (server error body, proxy error, network failure) into the same shape as a
+ * rejected submission, so it renders in the red result panel with a specific reason and next steps.
+ */
+function buildErrorResult(
+  account: string,
+  submissionType: string,
+  httpStatus: number,
+  body: ErrorBody | null,
+): SubmissionResponse {
+  let detail: ErrorBody;
+  if (body && (body.reason || body.message)) {
+    detail = body;                                            // structured error from our API
+  } else if (httpStatus === 0) {
+    detail = {
+      title: 'Cannot reach the server',
+      reason: 'Your browser could not connect to the server, so nothing was submitted.',
+      failedChecks: ['No response from the server'],
+      guidelines: ['Check your internet / VPN connection, then press Submit again. If the page was open for a long time, reload it first.'],
+    };
+  } else if (httpStatus === 413) {
+    detail = {
+      title: 'Image is too large',
+      reason: 'The server refused the upload because the file is too big.',
+      failedChecks: ['Upload exceeds the size limit'],
+      guidelines: ['Take a new screenshot or save it as JPG so it is under 10 MB, then submit again.'],
+    };
+  } else if (httpStatus === 429) {
+    detail = {
+      title: 'Too many attempts',
+      reason: 'You have submitted too many times in a short period.',
+      failedChecks: ['Rate limit reached'],
+      guidelines: ['Wait about a minute, then submit again.'],
+    };
+  } else {
+    detail = {
+      title: 'Submission could not be completed',
+      reason: `The server answered with an unexpected error (HTTP ${httpStatus}). Your image was not saved.`,
+      failedChecks: [`Unexpected response (HTTP ${httpStatus})`],
+      guidelines: ['Try again in a minute. If it keeps failing, send your account and the time of the attempt to your administrator.'],
+    };
+  }
+
+  return {
+    account,
+    submissionType,
+    status: 'REJECTED',
+    validationResult: JSON.stringify({
+      valid: false,
+      matchesType: false,
+      confidence: 0,
+      title: detail.title,
+      reason: detail.reason ?? detail.message,
+      failedChecks: detail.failedChecks ?? [],
+      guidelines: detail.guidelines ?? [],
+      suggestion: detail.suggestion,
+    }),
+  };
+}
+
 function formatBytes(n: number) {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -109,6 +178,8 @@ export default function DashboardForm() {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [supportedTypes, setSupportedTypes] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Border colour after a submit: green = accepted, red = error/rejected. Cleared when the image changes.
+  const [scanOutcome, setScanOutcome] = useState<'ok' | 'err' | null>(null);
   const [result, setResult] = useState<SubmissionResponse | null>(null);
   const [memberRow, setMemberRow] = useState<MemberRow | null>(null);
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
@@ -124,6 +195,7 @@ export default function DashboardForm() {
 
   const applyFile = useCallback(async (f: File) => {
     setFile(f);
+    setScanOutcome(null);
     setFileTouched(true);
     setFileValidating(true);
     // Create preview URL (revoke previous one first)
@@ -159,6 +231,7 @@ export default function DashboardForm() {
     e.preventDefault();
     e.stopPropagation();
     setFile(null);
+    setScanOutcome(null);
     setFileError(null);
     setFileTouched(false);
     setImagePreview(prev => { if (prev) URL.revokeObjectURL(prev); return null; });
@@ -185,6 +258,9 @@ export default function DashboardForm() {
     }
 
     setIsSubmitting(true);
+    setScanOutcome(null);
+    // Keep the scan visible for at least one full sweep, even when the API answers instantly.
+    const minScan = new Promise<void>(r => setTimeout(r, 2200));
     const fd = new FormData();
     fd.append('account', account.trim());
     fd.append('submissionType', submissionType);
@@ -192,8 +268,17 @@ export default function DashboardForm() {
 
     try {
       const res = await fetch('/api/submission', { method: 'POST', body: fd });
-      const data = await res.json() as SubmissionResponse & { message?: string };
-      if (!res.ok) { showToast(data.message ?? 'Submission failed', false); return; }
+      const raw = await res.json().catch(() => null) as (SubmissionResponse & ErrorBody) | null;
+      await minScan;
+      if (!res.ok || !raw || !raw.status) {
+        // Show the failure in the bottom result panel (red), not as a popup
+        setScanOutcome('err');
+        setResult(buildErrorResult(account.trim(), submissionType, res.status, raw));
+        setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+        return;
+      }
+      const data = raw as SubmissionResponse;
+      setScanOutcome(data.status === 'REJECTED' ? 'err' : 'ok');
       setResult(data);
       setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
       if (data.status !== 'REJECTED') {
@@ -203,11 +288,12 @@ export default function DashboardForm() {
           .then(r => r.json())
           .then((row: MemberRow) => setMemberRow(row))
           .catch(() => setMemberRow(null));
-      } else {
-        showToast('Validation failed. Please fix the issues and try again.', false);
       }
     } catch {
-      showToast('Submission failed. Please try again.', false);
+      await minScan;
+      setScanOutcome('err');
+      setResult(buildErrorResult(account.trim(), submissionType, 0, null));
+      setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
     } finally {
       setIsSubmitting(false);
     }
@@ -332,8 +418,15 @@ export default function DashboardForm() {
                 const f = e.dataTransfer.files?.[0];
                 if (f) await applyFile(f);
               }}
-              className={`flex flex-col items-center justify-center gap-3 w-full rounded-xl border-2 border-dashed cursor-pointer transition-colors px-6 py-8
-                ${isDragging
+              className={`flex flex-col items-center justify-center gap-3 w-full rounded-xl border-2 cursor-pointer transition-colors px-6 py-8
+                ${isSubmitting
+                  ? 'border-dashed border-primary-500 bg-primary-50'
+                  : scanOutcome === 'ok'
+                    ? 'border-solid border-green-500 bg-green-50 ring-4 ring-green-500/20'
+                    : scanOutcome === 'err'
+                      ? 'border-solid border-red-500 bg-red-50 ring-4 ring-red-500/20 scan-shake'
+                      : 'border-dashed'}
+                ${isSubmitting || scanOutcome ? '' : isDragging
                   ? 'border-primary-500 bg-primary-50'
                   : fileTouched && fileError
                     ? 'border-red-400 bg-red-50'
@@ -350,12 +443,20 @@ export default function DashboardForm() {
               ) : file && !fileError ? (
                 <>
                   {imagePreview && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={imagePreview}
-                      alt="Preview"
-                      className="max-h-40 max-w-full rounded-lg object-contain shadow-sm"
-                    />
+                    <div className="relative inline-block max-w-full overflow-hidden rounded-lg leading-none shadow-sm">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={imagePreview}
+                        alt="Preview"
+                        className="max-h-40 max-w-full object-contain"
+                      />
+                      {isSubmitting && (
+                        <div className="scan-layer" aria-hidden="true">
+                          <div className="scan-dim" />
+                          <div className="scan-line" />
+                        </div>
+                      )}
+                    </div>
                   )}
                   <div className="text-center">
                     <p className="text-sm font-medium text-gray-800 break-all">{file.name}</p>

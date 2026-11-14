@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import MultiSelectDropdown from "./MultiSelectDropdown";
 import TypeCombobox from "./TypeCombobox";
-import { useAdminEvents } from "@/hooks/useAdminEvents";
+import { useAutoRefresh, isTypingInField } from "@/hooks/useAutoRefresh";
 
 const PAGE_SIZE = 50; // items per page (passed to API as limit)
 
@@ -185,6 +185,24 @@ function authHeaders(extra?: Record<string, string>) {
 }
 
 const STATUS_OPTIONS = ["PENDING", "APPROVED", "REJECTED"] as const;
+
+/**
+ * Row background by submission status — soft tints (hover goes one shade deeper):
+ * APPROVED → green, PENDING → yellow, REJECTED → stronger red (real problem),
+ * not submitted → no tint (white).
+ */
+function rowStatusClass(status: string | undefined): string {
+  switch ((status ?? "").toUpperCase()) {
+    case "APPROVED":
+      return "bg-green-200/80 [&:hover>td]:!bg-green-300/80";
+    case "PENDING":
+      return "bg-yellow-200/80 [&:hover>td]:!bg-yellow-300/80";
+    case "REJECTED":
+      return "bg-red-300/60 [&:hover>td]:!bg-red-300/90";
+    default: // NOT_SUBMITTED or no submission → plain white (default hover)
+      return "";
+  }
+}
 
 function statusBadge(s: string | undefined) {
   if (!s || s === "NOT_SUBMITTED") return "badge-missing";
@@ -369,7 +387,10 @@ export default function UserList() {
     filterTags,
   });
 
-  const loadPage = useCallback(async (offset: number, reset: boolean) => {
+  const loadSeqRef = useRef(0);
+  const loadAbortRef = useRef<AbortController | null>(null);
+
+  const loadPage = useCallback(async (offset: number, reset: boolean, silent = false) => {
     const { filterProjects, filterMonth, filterYear, filterTags } =
       filterStateRef.current;
     const params = new URLSearchParams();
@@ -381,11 +402,23 @@ export default function UserList() {
     if (filterYear) params.set("year", filterYear);
     filterTags.forEach((t) => params.append("tag", t));
 
-    if (reset) setIsLoading(true);
-    else setIsFetchingMore(true);
+    // A reset load (filter change / refresh) supersedes anything in flight: abort the
+    // older request and ignore its response so stale data can never overwrite newer filters.
+    const requestId = reset ? ++loadSeqRef.current : loadSeqRef.current;
+    if (reset) {
+      loadAbortRef.current?.abort();
+      loadAbortRef.current = new AbortController();
+    }
+    const signal = loadAbortRef.current?.signal;
+
+    // silent = background auto-refresh: no spinner, so the table doesn't flash or lose scroll.
+    if (reset) {
+      if (!silent) setIsLoading(true);
+    } else setIsFetchingMore(true);
     try {
       const res = await fetch(`/api/admin/user-list?${params}`, {
         headers: authHeaders(),
+        signal,
       });
       if (!res.ok) throw new Error("Failed");
       const d = (await res.json()) as {
@@ -394,6 +427,7 @@ export default function UserList() {
         projects: string[];
         summary: { approved: number; submitted: number; notSubmitted: number };
       };
+      if (requestId !== loadSeqRef.current) return; // superseded by a newer request
       if (reset) {
         setItems(d.items);
         setColWidths(computeColWidths(d.items));
@@ -407,12 +441,18 @@ export default function UserList() {
       setTotal(d.total);
       setSummary(d.summary);
       if (d.projects.length > 0) setAvailableProjects(d.projects);
-    } catch {
-      setToast({ msg: "Failed to load user list", ok: false });
-      setTimeout(() => setToast(null), 3500);
+    } catch (err) {
+      if ((err as Error).name === "AbortError") return; // superseded, not a failure
+      if (requestId !== loadSeqRef.current) return;
+      if (!silent) {
+        setToast({ msg: "Failed to load user list", ok: false });
+        setTimeout(() => setToast(null), 3500);
+      }
     } finally {
-      setIsLoading(false);
-      setIsFetchingMore(false);
+      if (requestId === loadSeqRef.current) {
+        setIsLoading(false);
+        setIsFetchingMore(false);
+      }
     }
   }, []); // stable — reads filters via ref
 
@@ -461,8 +501,28 @@ export default function UserList() {
     }
   }
 
-  // Real-time updates via SSE — instantly reloads when tracking or submissions change.
-  useAdminEvents({ onTracking: loadData, onSubmissions: loadData });
+  // Auto-refresh once a minute, but never while the admin is mid-edit (inline cell edit,
+  // any open modal, a save/upload in progress, or typing in a field).
+  const busyRef = useRef(false);
+  busyRef.current =
+    editCell !== null ||
+    isSavingCell ||
+    editRow !== null ||
+    reviewIdx !== null ||
+    reviewSeedEdit !== null ||
+    isReviewSaving ||
+    isSeedSaving ||
+    showAddMemberModal ||
+    isSavingMember ||
+    isUploading ||
+    isDownloading ||
+    isClearing ||
+    isLoading ||
+    isFetchingMore ||
+    tagInput.trim() !== "";
+  useAutoRefresh(() => loadPage(0, true, true), {
+    isBusy: () => busyRef.current || isTypingInField(),
+  });
 
   // Infinite scroll sentinel
   const hasMore = items.length < total;
@@ -1753,6 +1813,7 @@ export default function UserList() {
           selected={filterProjects}
           onChange={setFilterProjects}
           placeholder="All projects"
+          emptyMeansAll
           className="w-48"
         />
 
@@ -2006,12 +2067,7 @@ export default function UserList() {
               sortedItems.map((row, idx) => (
                 <tr
                   key={row.submissionId ?? `tr-${row.trackingNo ?? idx}`}
-                  className={
-                    !row.submissionStatus ||
-                    row.submissionStatus === "NOT_SUBMITTED"
-                      ? "bg-red-50"
-                      : ""
-                  }
+                  className={rowStatusClass(row.submissionStatus)}
                 >
                   {/* No. — not editable */}
                   <td className="text-gray-400 font-medium border-r border-gray-200">

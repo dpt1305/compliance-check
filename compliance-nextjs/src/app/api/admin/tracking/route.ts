@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import ExcelJS from 'exceljs';
 import { COOKIE_NAME, extractBearerToken, verifyToken } from '@/lib/auth/jwt';
 import { findByUsername } from '@/lib/db/admin-repo';
-import { exportFollowUpAction, exportIssueCount } from '@/lib/services/excel-export';
+import { exportEvdTicket, exportFollowUpAction, exportIssueCount } from '@/lib/services/excel-export';
 import { getUserListData, type UserListEntry } from '@/lib/services/admin-user-list';
 import { trackingFilePath } from '@/lib/utils/tracking-path';
 import { readTrackingRows } from '@/lib/services/tracking-reader';
@@ -365,7 +365,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           exportIssueCount(member.seedConfiguration ?? sub?.seedConfiguration),
           exportIssueCount(member.operatingSystem ?? sub?.operatingSystem),
           exportFollowUpAction(member.followUpAction),
-          member.responseFromTicket ?? 'Refer photo captured in folder',
+          exportEvdTicket(member.responseFromTicket),
           deriveTrackingStatus(member.submissionStatus ?? sub?.status),
           '',
         ]);

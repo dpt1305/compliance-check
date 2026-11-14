@@ -1,3 +1,5 @@
+import { buildImageCrops, type ImageCrop } from '@/lib/utils/image-crops';
+
 export interface AiValidationResult {
   valid: boolean;
   matchesType: boolean;
@@ -198,13 +200,25 @@ async function callProvider(
   provider: AiProvider,
   imageBytes: Buffer,
   mimeType: string,
-  expectedType: string
+  expectedType: string,
+  crops: ImageCrop[] = [],
 ): Promise<AiValidationResult> {
   if (!provider.apiKey) throw new Error(`${provider.name} API key not configured`);
 
   const base64Image = imageBytes.toString('base64');
   const systemPrompt = selectPrompt(expectedType);
-  const userText = `Expected submission type: ${expectedType}. Validate this image.`;
+  const baseText = `Expected submission type: ${expectedType}. Validate this image.`;
+  const userText = crops.length > 0
+    ? `${baseText}\n\nThe FIRST image is the full screenshot. The ${crops.length} images after it are zoomed, sharpened crops of the SAME screenshot (corners where clocks/timestamps usually are, and the central text area). Use them to read small text, dates and times; do not treat them as separate submissions.`
+    : baseText;
+
+  const imageParts = [
+    { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Image}`, detail: 'high' } },
+    ...crops.flatMap(crop => [
+      { type: 'text', text: `Crop: ${crop.label}` },
+      { type: 'image_url', image_url: { url: `data:${crop.mimeType};base64,${crop.bytes.toString('base64')}`, detail: 'high' } },
+    ]),
+  ];
 
   const body = {
     model: provider.model,
@@ -214,7 +228,7 @@ async function callProvider(
         role: 'user',
         content: [
           { type: 'text', text: userText },
-          { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Image}` } },
+          ...imageParts,
         ],
       },
     ],
@@ -256,9 +270,12 @@ export async function validateImage(
     return { valid: false, matchesType: false, confidence: 0, reason: 'No AI providers configured' };
   }
 
+  // Built once and reused if we have to fall back to another provider.
+  const crops = await buildImageCrops(imageBytes);
+
   for (const provider of providers) {
     try {
-      const result = await callProvider(provider, imageBytes, mimeType, expectedType);
+      const result = await callProvider(provider, imageBytes, mimeType, expectedType, crops);
       return result;
     } catch (err) {
       console.warn(`AI provider ${provider.name} failed:`, (err as Error).message);
