@@ -188,16 +188,19 @@ const STATUS_OPTIONS = ["PENDING", "APPROVED", "REJECTED"] as const;
 
 /**
  * Row background by submission status — soft tints (hover goes one shade deeper):
- * APPROVED → green, PENDING → yellow, REJECTED / not submitted → light red.
+ * APPROVED → green, PENDING → yellow, REJECTED → stronger red (real problem),
+ * not submitted → no tint (white).
  */
 function rowStatusClass(status: string | undefined): string {
   switch ((status ?? "").toUpperCase()) {
     case "APPROVED":
-      return "bg-green-50 [&:hover>td]:!bg-green-100";
+      return "bg-green-200/80 [&:hover>td]:!bg-green-300/80";
     case "PENDING":
-      return "bg-yellow-50 [&:hover>td]:!bg-yellow-100";
-    default: // REJECTED, NOT_SUBMITTED or no submission
-      return "bg-red-50 [&:hover>td]:!bg-red-100";
+      return "bg-yellow-200/80 [&:hover>td]:!bg-yellow-300/80";
+    case "REJECTED":
+      return "bg-red-300/60 [&:hover>td]:!bg-red-300/90";
+    default: // NOT_SUBMITTED or no submission → plain white (default hover)
+      return "";
   }
 }
 
