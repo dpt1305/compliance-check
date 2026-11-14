@@ -34,15 +34,58 @@ const CHECKLIST_LABELS: Record<string, string> = {
   hasSerialNumber:              'Terminal output showing serial number not visible',
 };
 
-/**
- * Given the AI's structured checklist (key → boolean), return an array of
- * human-readable descriptions for every item that is false/missing.
- */
-function deriveFailedChecks(checklist: Record<string, boolean> | undefined): string[] {
+/** What the user should do to fix each failed checklist item. Shown next to the failed item. */
+const CHECKLIST_GUIDES: Record<string, string> = {
+  hasClock:            'Capture the whole screen including the taskbar, so the date and time at the bottom-right corner are readable.',
+  hasWindowsUpdate:    'Open Settings > Windows Update, install any pending updates and restart, then screenshot the page showing "You\'re up to date".',
+  hasDeviceName:       'Open Settings > System > About and make sure the full Device name is visible and not cut off.',
+  hasDeviceSerial:     'Make sure the full serial number is visible and not cut off (Settings > System > About, or on the SEED page).',
+  hasDashboard:        'Open the SEED dashboard and capture it in full so all four counters (Malware Alerts, Compliance Checks, SEED Configuration, Operating System) are readable.',
+  hasTrellix:          'Open Trellix and capture the window showing the status "ok" / "turned on". If it is off or shows a warning, fix that first and then retake the screenshot.',
+  hasSeedDashboard:    'Open the SEED dashboard and capture it with the device name, serial number and all counters visible.',
+  hasTimestamp:        'Capture the whole screen including the menu bar, so the date and time at the top-right corner are readable.',
+  hasMacInfo:          'Open the Apple menu > About This Mac and include the model name and serial number in the screenshot.',
+  hasVirusThreatProtection:     'Open Windows Security and capture the page where Virus & threat protection shows a green tick. If it shows a warning, resolve it first.',
+  hasAccountProtection:         'Open Windows Security and capture the page where Account protection shows a green tick. If it shows a warning, resolve it first.',
+  hasFirewallNetworkProtection: 'Open Windows Security and capture the page where Firewall & network protection shows a green tick. If it shows a warning, resolve it first.',
+  hasAppBrowserControl:         'Open Windows Security and capture the page where App & browser control shows a green tick. If it shows a warning, resolve it first.',
+  hasDeviceSecurity:            'Open Windows Security and capture the page where Device security shows a green tick. If it shows a warning, resolve it first.',
+  hasDevicePerformanceHealth:   'Open Windows Security and capture the page where Device performance & health shows "No action needed".',
+  hasSerialNumber:              'Run the command that prints the serial number and capture the terminal so the full output is visible.',
+  hasFullScan:                  'Run a full scan, wait until it completes, then capture the scan result page.',
+};
+CHECKLIST_LABELS.hasFullScan = 'Full scan result not visible or the scan has not completed';
+
+interface FailedItem { check: string; guide: string }
+
+/** Failed checklist entries (key -> false) as human-readable item + the action to fix it. */
+function deriveFailedItems(checklist: Record<string, boolean> | undefined): FailedItem[] {
   if (!checklist) return [];
   return Object.entries(checklist)
     .filter(([, passed]) => !passed)
-    .map(([key]) => CHECKLIST_LABELS[key] ?? key);
+    .map(([key]) => ({ check: CHECKLIST_LABELS[key] ?? key, guide: CHECKLIST_GUIDES[key] ?? '' }));
+}
+
+/**
+ * Every non-success outcome uses this one shape so the form can render it in the same bottom panel as a
+ * rejected image (red) - a specific reason, the things that failed, and what the user should do next.
+ */
+function failure(
+  status: number,
+  o: { title?: string; reason: string; items?: FailedItem[]; suggestion?: string },
+): NextResponse {
+  const items = o.items ?? [];
+  return NextResponse.json({
+    valid: false,
+    matchesType: false,
+    confidence: 0,
+    message: o.reason,
+    title: o.title,
+    reason: o.reason,
+    failedChecks: items.map(i => i.check),
+    guidelines: items.map(i => i.guide),
+    suggestion: o.suggestion,
+  }, { status });
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -52,16 +95,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const submissionType = (formData.get('submissionType') as string | null)?.trim();
     const imageFile = formData.get('image') as File | null;
 
-    if (!account) return NextResponse.json({ message: 'Account is required' }, { status: 400 });
-    if (!submissionType) return NextResponse.json({ message: 'Submission type is required' }, { status: 400 });
-    if (!imageFile) return NextResponse.json({ message: 'Image file is required' }, { status: 400 });
+    if (!account) return failure(400, {
+      title: 'Account is missing',
+      reason: 'No account was provided with this submission.',
+      items: [{ check: 'Account field is empty', guide: 'Enter your account (the same one registered in the compliance tracking list) and submit again.' }],
+    });
+    if (!submissionType) return failure(400, {
+      title: 'Submission type is missing',
+      reason: 'No submission type (Windows / Mac / Thin ...) was selected.',
+      items: [{ check: 'Type is not selected', guide: 'Choose the type that matches the device in your screenshot and submit again.' }],
+    });
+    if (!imageFile) return failure(400, {
+      title: 'Image is missing',
+      reason: 'No image file was received by the server.',
+      items: [{ check: 'No image attached', guide: 'Select or paste your screenshot again, wait for the preview to appear, then submit.' }],
+    });
 
     // Validate type
     if (!isTypeSupported(submissionType)) {
-      return NextResponse.json(
-        { message: `Unsupported submission type: '${submissionType}'` },
-        { status: 400 }
-      );
+      return failure(400, {
+        title: 'Unsupported submission type',
+        reason: `The submission type "${submissionType}" is not supported.`,
+        items: [{ check: `Type "${submissionType}" is not in the supported list`, guide: 'Reload the page and pick the type from the dropdown. If the type you need is missing, contact your administrator.' }],
+      });
     }
 
     // Read tracking rows once — reused for both the early account check and post-AI serial check
@@ -69,15 +125,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // Early account check — reject immediately if account not in tracking.xlsx (saves AI cost)
     if (trackingRows.length > 0 && !accountInTracking(trackingRows, account)) {
-      return NextResponse.json({
-        valid: false,
-        matchesType: false,
-        confidence: 0,
-        message: `Account "${account}" is not registered in the compliance tracking list. Please contact your administrator.`,
-        reason: 'Account not found in tracking system',
-        failedChecks: ['Account not registered in tracking system'],
-        guidelines: ['Contact your administrator to register your account'],
-      }, { status: 422 });
+      return failure(422, {
+        title: 'Account not found',
+        reason: `The account "${account}" is not in the compliance tracking list, so your image was not checked.`,
+        items: [{
+          check: `Account "${account}" is not registered`,
+          guide: 'Check the spelling and enter your account exactly as registered (no extra spaces). If it is correct, send your account and project name to your administrator so they can add you to the tracking list.',
+        }],
+      });
     }
 
     // Read image bytes
@@ -90,7 +145,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const validated = validateImageBuffer(imageBytes, imageFile.type, imageFile.name, imageFile.size);
       ext = validated.ext;
     } catch (err) {
-      return NextResponse.json({ message: (err as Error).message }, { status: 400 });
+      const msg = (err as Error).message;
+      const tooBig = /10MB/i.test(msg);
+      return failure(400, {
+        title: tooBig ? 'Image is too large' : 'Image file is not valid',
+        reason: msg,
+        items: [{
+          check: tooBig ? 'File is larger than 10 MB' : 'File is not a valid JPG / PNG / WEBP image',
+          guide: tooBig
+            ? 'Take the screenshot again (a normal full-screen capture is well under 10 MB) or save it as JPG, then submit again.'
+            : 'Do not rename other file types to .png/.jpg. Take a fresh screenshot (Win+Shift+S on Windows, Cmd+Shift+4 on Mac), save it as PNG or JPG, and upload that file.',
+        }],
+      });
     }
 
     // Check extension against allowed types for submission type
@@ -98,10 +164,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const extWithoutDot = ext.replace('.', '');
     const extJpeg = extWithoutDot === 'jpg' ? 'jpeg' : extWithoutDot;
     if (!allowedExts.includes(extWithoutDot) && !allowedExts.includes(extJpeg)) {
-      return NextResponse.json(
-        { message: `Image format '${extWithoutDot}' not allowed for type '${submissionType}'. Allowed: ${allowedExts.join(', ')}` },
-        { status: 400 }
-      );
+      return failure(400, {
+        title: 'Image format not allowed',
+        reason: `The format "${extWithoutDot}" is not accepted for type "${submissionType}". Allowed formats: ${allowedExts.join(', ')}.`,
+        items: [{ check: `Format "${extWithoutDot}" not allowed`, guide: `Save or convert your screenshot to one of: ${allowedExts.join(', ')} and upload it again.` }],
+      });
     }
 
     // AI validation
@@ -128,47 +195,61 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             && trackingRows.some(r => r !== accountRow && r.name?.trim().toLowerCase() === extractedName);
 
           if (serialMismatch || nameBelongsToDifferentRow) {
-            return NextResponse.json({
-              valid: false,
-              matchesType: false,
-              confidence: 0,
-              message: 'The device shown in the image does not match your registered device. Please submit a screenshot from your own device.',
+            return failure(422, {
+              title: 'Screenshot is from a different device',
               reason: serialMismatch
-                ? `Device serial "${aiResult.deviceSerial}" does not match the serial registered for account "${account}"`
-                : `Device name "${aiResult.deviceName}" is registered to a different account`,
-              failedChecks: ['Device does not match account registration'],
-              guidelines: ['Make sure you are submitting a screenshot from your own device'],
-            }, { status: 422 });
+                ? `The serial number in your screenshot ("${aiResult.deviceSerial}") does not match the device registered for account "${account}".`
+                : `The device name in your screenshot ("${aiResult.deviceName}") is registered to a different account.`,
+              items: [{
+                check: serialMismatch ? 'Serial number does not match your registered device' : 'Device name belongs to another account',
+                guide: `Submit a screenshot taken on your own registered laptop. Also check that "${account}" is your own account. If you were issued a new or replacement device, ask your administrator to update the device serial in the tracking list, then submit again.`,
+              }],
+              suggestion: 'Nothing was saved. Once you are on the right device (or the record is updated), submit again.',
+            });
           }
         }
       }
     }
 
+    // AI service itself failed (no provider answered) - the image was never judged, so say that clearly
+    if (!aiResult.valid && confidence === 0 && !aiResult.checklist && /AI providers/i.test(aiResult.reason ?? '')) {
+      return failure(503, {
+        title: 'Validation service unavailable',
+        reason: 'Your image could not be checked because the AI validation service did not respond. This is not a problem with your screenshot.',
+        items: [{
+          check: 'AI validation service unavailable',
+          guide: 'Wait 1-2 minutes and submit the same image again. If it still fails after a few tries, send your account and the time of the attempt to your administrator.',
+        }],
+      });
+    }
+
     // If AI validation failed (or confidence is below 100), return result without saving image or record
     if (!aiResult.valid || !aiResult.matchesType || !hasPerfectConfidence) {
-      // Derive structured failed checks from the checklist boolean map
-      const checklistFailed = deriveFailedChecks(aiResult.checklist as Record<string, boolean> | undefined);
+      // Structured checklist items first (each with its own fix), then any extra items the AI returned
+      const checklistItems = deriveFailedItems(aiResult.checklist as Record<string, boolean> | undefined);
+      const aiOnlyItems: FailedItem[] = (aiResult.failedChecks ?? [])
+        .map((c, i) => ({ check: c, guide: aiResult.guidelines?.[i] ?? '' }))
+        .filter(x => !checklistItems.some(f => f.check.toLowerCase().includes(x.check.toLowerCase().slice(0, 10))));
+      const items = [...checklistItems, ...aiOnlyItems];
 
-      // Merge: checklist-derived items first (structured), then any extra items AI returned
-      const aiFailedChecks = aiResult.failedChecks ?? [];
-      const mergedFailedChecks = [
-        ...checklistFailed,
-        ...aiFailedChecks.filter(c => !checklistFailed.some(f => f.toLowerCase().includes(c.toLowerCase().slice(0, 10)))),
-      ];
-
-      // If confidence < 100 but checklist all passed, add a generic clarity note
-      if (!hasPerfectConfidence && mergedFailedChecks.length === 0) {
-        mergedFailedChecks.push(`Image clarity or completeness below required threshold (${confidence}% confidence — 100% required)`);
+      // Confidence < 100 but nothing specific failed: tell the user how to get a clearer capture
+      if (!hasPerfectConfidence && items.length === 0) {
+        items.push({
+          check: `Image is not clear or complete enough (${confidence}% confidence - 100% required)`,
+          guide: 'Retake the screenshot full-screen with the whole window visible: no overlapping windows, no zoomed-out or blurry text, no glare if photographed. Submit that new image.',
+        });
       }
 
       const rejectionResult = {
         ...aiResult,
         valid: false,
+        title: 'Image Not Valid',
         reason: !hasPerfectConfidence && aiResult.valid
-          ? `Confidence ${confidence}% is below the required 100%. Please check the conditions listed below and retake your screenshot.`
-          : (aiResult.reason || 'Image did not meet compliance requirements.'),
-        failedChecks: mergedFailedChecks,
-        guidelines: aiResult.guidelines ?? [],
+          ? `The AI could only read your screenshot with ${confidence}% confidence; 100% is required. Fix the items below and retake it.`
+          : (aiResult.reason || 'The image did not meet the compliance requirements.'),
+        failedChecks: items.map(i => i.check),
+        guidelines: items.map(i => i.guide),
+        suggestion: aiResult.suggestion ?? 'Fix every item above, take a new screenshot, and submit again.',
       };
 
       return NextResponse.json({
@@ -259,6 +340,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   } catch (err) {
     console.error('Submission error:', err);
-    return NextResponse.json({ message: 'Internal server error' }, { status: 500 });
+    return failure(500, {
+      title: 'Something went wrong on the server',
+      reason: 'The server hit an unexpected error while processing your submission. Your image was not saved.',
+      items: [{
+        check: 'Unexpected server error',
+        guide: 'Try submitting again. If it keeps failing, send your account, the time of the attempt and a screenshot of this message to your administrator.',
+      }],
+    });
   }
 }

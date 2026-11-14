@@ -92,6 +92,75 @@ async function validateFile(file: File): Promise<FileError | null> {
   return null;
 }
 
+interface ErrorBody {
+  message?: string;
+  title?: string;
+  reason?: string;
+  failedChecks?: string[];
+  guidelines?: string[];
+  suggestion?: string;
+}
+
+/**
+ * Turn any failed request (server error body, proxy error, network failure) into the same shape as a
+ * rejected submission, so it renders in the red result panel with a specific reason and next steps.
+ */
+function buildErrorResult(
+  account: string,
+  submissionType: string,
+  httpStatus: number,
+  body: ErrorBody | null,
+): SubmissionResponse {
+  let detail: ErrorBody;
+  if (body && (body.reason || body.message)) {
+    detail = body;                                            // structured error from our API
+  } else if (httpStatus === 0) {
+    detail = {
+      title: 'Cannot reach the server',
+      reason: 'Your browser could not connect to the server, so nothing was submitted.',
+      failedChecks: ['No response from the server'],
+      guidelines: ['Check your internet / VPN connection, then press Submit again. If the page was open for a long time, reload it first.'],
+    };
+  } else if (httpStatus === 413) {
+    detail = {
+      title: 'Image is too large',
+      reason: 'The server refused the upload because the file is too big.',
+      failedChecks: ['Upload exceeds the size limit'],
+      guidelines: ['Take a new screenshot or save it as JPG so it is under 10 MB, then submit again.'],
+    };
+  } else if (httpStatus === 429) {
+    detail = {
+      title: 'Too many attempts',
+      reason: 'You have submitted too many times in a short period.',
+      failedChecks: ['Rate limit reached'],
+      guidelines: ['Wait about a minute, then submit again.'],
+    };
+  } else {
+    detail = {
+      title: 'Submission could not be completed',
+      reason: `The server answered with an unexpected error (HTTP ${httpStatus}). Your image was not saved.`,
+      failedChecks: [`Unexpected response (HTTP ${httpStatus})`],
+      guidelines: ['Try again in a minute. If it keeps failing, send your account and the time of the attempt to your administrator.'],
+    };
+  }
+
+  return {
+    account,
+    submissionType,
+    status: 'REJECTED',
+    validationResult: JSON.stringify({
+      valid: false,
+      matchesType: false,
+      confidence: 0,
+      title: detail.title,
+      reason: detail.reason ?? detail.message,
+      failedChecks: detail.failedChecks ?? [],
+      guidelines: detail.guidelines ?? [],
+      suggestion: detail.suggestion,
+    }),
+  };
+}
+
 function formatBytes(n: number) {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -199,9 +268,16 @@ export default function DashboardForm() {
 
     try {
       const res = await fetch('/api/submission', { method: 'POST', body: fd });
-      const data = await res.json() as SubmissionResponse & { message?: string };
+      const raw = await res.json().catch(() => null) as (SubmissionResponse & ErrorBody) | null;
       await minScan;
-      if (!res.ok) { setScanOutcome('err'); showToast(data.message ?? 'Submission failed', false); return; }
+      if (!res.ok || !raw || !raw.status) {
+        // Show the failure in the bottom result panel (red), not as a popup
+        setScanOutcome('err');
+        setResult(buildErrorResult(account.trim(), submissionType, res.status, raw));
+        setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+        return;
+      }
+      const data = raw as SubmissionResponse;
       setScanOutcome(data.status === 'REJECTED' ? 'err' : 'ok');
       setResult(data);
       setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
@@ -212,13 +288,12 @@ export default function DashboardForm() {
           .then(r => r.json())
           .then((row: MemberRow) => setMemberRow(row))
           .catch(() => setMemberRow(null));
-      } else {
-        showToast('Validation failed. Please fix the issues and try again.', false);
       }
     } catch {
       await minScan;
       setScanOutcome('err');
-      showToast('Submission failed. Please try again.', false);
+      setResult(buildErrorResult(account.trim(), submissionType, 0, null));
+      setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
     } finally {
       setIsSubmitting(false);
     }
