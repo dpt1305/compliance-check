@@ -4,6 +4,7 @@ import { storeImage, getPublicUrl } from '@/lib/utils/file-storage';
 import { generateSavedName } from '@/lib/utils/image-rename';
 import { isTypeSupported, getAllowedExtensions } from '@/lib/services/excel-mapping';
 import { validateImage } from '@/lib/services/ai-validation';
+import { decide, normalizeSerial, CONFIDENCE_REJECT_BELOW } from '@/lib/services/validation-policy';
 import { save } from '@/lib/db/submission-repo';
 import type { Submission } from '@/lib/storage/json-storage';
 import { updateTrackingExcel, buildSeedValues } from '@/lib/services/excel-update';
@@ -14,16 +15,16 @@ export const maxDuration = 60;
 /** Human-readable label for every structured checklist key the AI can return. */
 const CHECKLIST_LABELS: Record<string, string> = {
   // Windows
-  hasClock:            'System clock not visible in taskbar bottom-right corner',
+  hasClock:            'System clock not visible on the taskbar (dates inside web pages do not count)',
   hasWindowsUpdate:    "Windows Update does not show \"You're up to date\"",
-  hasDeviceName:       'Device name not fully visible (may be truncated)',
-  hasDeviceSerial:     'Device serial number not fully visible (may be truncated)',
+  hasDeviceName:       'Device name not fully readable (hidden, masked or truncated)',
+  hasDeviceSerial:     'Device serial number not fully readable, or serial numbers in the screenshot do not match',
   hasDashboard:        'SEED dashboard not visible or counter values unreadable',
   // Mac
   hasTrellix:          "Trellix status not visible or not showing \"ok\" / \"turned on\"",
   hasSeedDashboard:    'SEED dashboard with device name, serial, and 4+ counters not visible',
-  hasTimestamp:        'System timestamp not visible in top-right corner',
-  hasMacInfo:          'Mac system info (model name + serial) not visible',
+  hasTimestamp:        'System clock not visible in the macOS menu bar (dates inside web pages do not count)',
+  hasMacInfo:          'About This Mac not visible with the model name and complete serial number',
   // Thin
   hasVirusThreatProtection:     "Virus & threat protection does not show a green tick",
   hasAccountProtection:         "Account protection does not show a green tick",
@@ -31,27 +32,27 @@ const CHECKLIST_LABELS: Record<string, string> = {
   hasAppBrowserControl:         "App & browser control does not show a green tick",
   hasDeviceSecurity:            "Device security does not show a green tick",
   hasDevicePerformanceHealth:   "Device performance & health does not show \"No action needed\"",
-  hasSerialNumber:              'Terminal output showing serial number not visible',
+  hasSerialNumber:              'Terminal output showing the complete serial number not visible',
 };
 
 /** What the user should do to fix each failed checklist item. Shown next to the failed item. */
 const CHECKLIST_GUIDES: Record<string, string> = {
-  hasClock:            'Capture the whole screen including the taskbar, so the date and time at the bottom-right corner are readable.',
+  hasClock:            'Include the Windows taskbar so the system clock is readable. Dates inside web pages (for example a page footer) do not count.',
   hasWindowsUpdate:    'Open Settings > Windows Update, install any pending updates and restart, then screenshot the page showing "You\'re up to date".',
-  hasDeviceName:       'Open Settings > System > About and make sure the full Device name is visible and not cut off.',
-  hasDeviceSerial:     'Make sure the full serial number is visible and not cut off (Settings > System > About, or on the SEED page).',
+  hasDeviceName:       'Make sure the complete device name is visible: not masked, blacked-out, cut off or covered by another window (Settings > System > About, or the SEED page).',
+  hasDeviceSerial:     'Make sure the complete serial number is visible: not masked, blurred, cut off or covered by another window.',
   hasDashboard:        'Open the SEED dashboard and capture it in full so all four counters (Malware Alerts, Compliance Checks, SEED Configuration, Operating System) are readable.',
   hasTrellix:          'Open Trellix and capture the window showing the status "ok" / "turned on". If it is off or shows a warning, fix that first and then retake the screenshot.',
   hasSeedDashboard:    'Open the SEED dashboard and capture it with the device name, serial number and all counters visible.',
-  hasTimestamp:        'Capture the whole screen including the menu bar, so the date and time at the top-right corner are readable.',
-  hasMacInfo:          'Open the Apple menu > About This Mac and include the model name and serial number in the screenshot.',
+  hasTimestamp:        'Include the macOS menu bar so the system clock is readable. Dates inside web pages (for example a page footer) do not count.',
+  hasMacInfo:          'Open the Apple menu > About This Mac and include the model name and the complete serial number.',
   hasVirusThreatProtection:     'Open Windows Security and capture the page where Virus & threat protection shows a green tick. If it shows a warning, resolve it first.',
   hasAccountProtection:         'Open Windows Security and capture the page where Account protection shows a green tick. If it shows a warning, resolve it first.',
   hasFirewallNetworkProtection: 'Open Windows Security and capture the page where Firewall & network protection shows a green tick. If it shows a warning, resolve it first.',
   hasAppBrowserControl:         'Open Windows Security and capture the page where App & browser control shows a green tick. If it shows a warning, resolve it first.',
   hasDeviceSecurity:            'Open Windows Security and capture the page where Device security shows a green tick. If it shows a warning, resolve it first.',
   hasDevicePerformanceHealth:   'Open Windows Security and capture the page where Device performance & health shows "No action needed".',
-  hasSerialNumber:              'Run the command that prints the serial number and capture the terminal so the full output is visible.',
+  hasSerialNumber:              'Run the command that prints the serial number and capture the terminal so the full serial is visible. A serial that wraps onto a second line is fine.',
   hasFullScan:                  'Run a full scan, wait until it completes, then capture the scan result page.',
 };
 CHECKLIST_LABELS.hasFullScan = 'Full scan result not visible or the scan has not completed';
@@ -174,18 +175,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // AI validation
     const aiResult = await validateImage(imageBytes, imageFile.type, submissionType);
     const confidence = Number(aiResult.confidence ?? 0);
-    const hasPerfectConfidence = Number.isFinite(confidence) && confidence === 100;
+    const decision = decide(aiResult);
 
     // Post-AI cross-validation: serial extracted from image must belong to THIS account's row
+    let serialUnverified = false;
     if (trackingRows.length > 0) {
-      const extractedSerial = aiResult.deviceSerial?.trim().toLowerCase();
+      const extractedSerial = normalizeSerial(aiResult.deviceSerial);
       const extractedName   = aiResult.deviceName?.trim().toLowerCase();
 
       if (extractedSerial || extractedName) {
         const accountRow = findRowForAccount(trackingRows, account);
 
         if (accountRow) {
-          const rowSerial = accountRow.serial?.trim().toLowerCase();
+          const rowSerial = normalizeSerial(accountRow.serial);
+          if (!rowSerial) serialUnverified = true;
           const rowName   = accountRow.name?.trim().toLowerCase();
 
           // If AI found a serial, it must match the account's registered serial
@@ -224,19 +227,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     // If AI validation failed (or confidence is below 100), return result without saving image or record
-    if (!aiResult.valid || !aiResult.matchesType || !hasPerfectConfidence) {
+    if (decision.verdict === 'reject') {
       // Structured checklist items first (each with its own fix), then any extra items the AI returned
-      const checklistItems = deriveFailedItems(aiResult.checklist as Record<string, boolean> | undefined);
+      const checklistItems = deriveFailedItems(Object.fromEntries(decision.failedKeys.map(k => [k, false])));
       const aiOnlyItems: FailedItem[] = (aiResult.failedChecks ?? [])
         .map((c, i) => ({ check: c, guide: aiResult.guidelines?.[i] ?? '' }))
         .filter(x => !checklistItems.some(f => f.check.toLowerCase().includes(x.check.toLowerCase().slice(0, 10))));
       const items = [...checklistItems, ...aiOnlyItems];
 
       // Confidence < 100 but nothing specific failed: tell the user how to get a clearer capture
-      if (!hasPerfectConfidence && items.length === 0) {
+      if (items.length === 0) {
         items.push({
-          check: `Image is not clear or complete enough (${confidence}% confidence - 100% required)`,
-          guide: 'Retake the screenshot full-screen with the whole window visible: no overlapping windows, no zoomed-out or blurry text, no glare if photographed. Submit that new image.',
+          check: decision.rejectReasons[0] ?? `Image is not clear or complete enough (${confidence}% confidence - at least ${CONFIDENCE_REJECT_BELOW}% required)`,
+          guide: 'Retake the screenshot so every required item is fully visible and sharp: no overlapping windows, no blurry or tiny text, no glare if photographed, and the complete serial number readable. Then submit that new image.',
         });
       }
 
@@ -244,8 +247,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         ...aiResult,
         valid: false,
         title: 'Image Not Valid',
-        reason: !hasPerfectConfidence && aiResult.valid
-          ? `The AI could only read your screenshot with ${confidence}% confidence; 100% is required. Fix the items below and retake it.`
+        reason: aiResult.valid
+          ? decision.rejectReasons.join(' ')
           : (aiResult.reason || 'The image did not meet the compliance requirements.'),
         failedChecks: items.map(i => i.check),
         guidelines: items.map(i => i.guide),
@@ -269,6 +272,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const failedChecks = aiResult.failedChecks ?? [];
     const [malwareAlerts, complianceCheck, seedConfiguration, operatingSystem] = buildSeedValues(aiResult);
 
+    // Accepted with 80-98% confidence (or no registered serial to compare): keep warnings for the admin only.
+    const warnings = decision.verdict === 'accept_warning' ? [...decision.warnings] : [];
+    if (serialUnverified) warnings.push('This account has no registered serial number, so the serial in the screenshot could not be verified.');
+    const savedResult = { ...aiResult, warning: warnings.length > 0, warnings };
+
     const submission: Submission = {
       id: 0,
       account,
@@ -278,7 +286,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       imageOriginalName: imageFile.name,
       imageSavedName: savedName,
       status: 'PENDING',
-      validationResult: JSON.stringify(aiResult),
+      validationResult: JSON.stringify(savedResult),
       validationChecklist: JSON.stringify(failedChecks),
       confidenceScore: aiResult.confidence,
       submissionDate: new Date().toISOString(),
