@@ -8,7 +8,8 @@ import { decide, normalizeSerial, CONFIDENCE_REJECT_BELOW } from '@/lib/services
 import { save } from '@/lib/db/submission-repo';
 import type { Submission } from '@/lib/storage/json-storage';
 import { updateTrackingExcel, buildSeedValues } from '@/lib/services/excel-update';
-import { readAll as readAllTracking, accountInTracking, findRowForAccount } from '@/lib/db/tracking-repo';
+import { readAll as readAllTracking } from '@/lib/db/tracking-repo';
+import type { TrackingMember } from '@/lib/db/tracking-repo';
 
 export const maxDuration = 60;
 
@@ -89,6 +90,16 @@ function failure(
   }, { status });
 }
 
+/**
+ * The account typed in the form must be EXACTLY an account the admin configured (same value, ignoring
+ * case and surrounding spaces). No matching on e-mail or name, and rows removed from tracking do not count.
+ */
+function findRegisteredAccountRow(rows: TrackingMember[], account: string): TrackingMember | undefined {
+  const wanted = account.trim().toLowerCase();
+  if (!wanted) return undefined;
+  return rows.find(r => !r.removedFromTracking && (r.account ?? '').trim().toLowerCase() === wanted);
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const formData = await req.formData();
@@ -124,15 +135,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Read tracking rows once — reused for both the early account check and post-AI serial check
     const trackingRows = await readAllTracking();
 
-    // Early account check — reject immediately if account not in tracking.xlsx (saves AI cost)
-    if (trackingRows.length > 0 && !accountInTracking(trackingRows, account)) {
+    // Early account check: the account must be one the admin registered. Never create users from submissions.
+    // Done before the AI call to save cost, and applies even when the tracking list is empty.
+    const accountRow = findRegisteredAccountRow(trackingRows, account);
+    if (!accountRow) {
       return failure(422, {
-        title: 'Account not found',
-        reason: `The account "${account}" is not in the compliance tracking list, so your image was not checked.`,
+        title: 'User not found',
+        reason: `We could not find the account "${account}" in the compliance system, so your image was not checked.`,
         items: [{
           check: `Account "${account}" is not registered`,
-          guide: 'Check the spelling and enter your account exactly as registered (no extra spaces). If it is correct, send your account and project name to your administrator so they can add you to the tracking list.',
+          guide: 'Check that you typed your account exactly as it was registered (no extra spaces). If it is correct, you have not been registered in the system yet: please contact your administrator for support.',
         }],
+        suggestion: 'Nothing was saved. Ask your administrator to add you to the tracking list, then submit again.',
       });
     }
 
@@ -177,40 +191,31 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const confidence = Number(aiResult.confidence ?? 0);
     const decision = decide(aiResult);
 
-    // Post-AI cross-validation: serial extracted from image must belong to THIS account's row
-    let serialUnverified = false;
-    if (trackingRows.length > 0) {
-      const extractedSerial = normalizeSerial(aiResult.deviceSerial);
-      const extractedName   = aiResult.deviceName?.trim().toLowerCase();
-
-      if (extractedSerial || extractedName) {
-        const accountRow = findRowForAccount(trackingRows, account);
-
-        if (accountRow) {
-          const rowSerial = normalizeSerial(accountRow.serial);
-          if (!rowSerial) serialUnverified = true;
-          const rowName   = accountRow.name?.trim().toLowerCase();
-
-          // If AI found a serial, it must match the account's registered serial
-          const serialMismatch = extractedSerial && rowSerial && extractedSerial !== rowSerial;
-          // If AI found a device name and no serial match, check name doesn't belong to a DIFFERENT row
-          const nameBelongsToDifferentRow = !serialMismatch && extractedName && rowName && extractedName !== rowName
-            && trackingRows.some(r => r !== accountRow && r.name?.trim().toLowerCase() === extractedName);
-
-          if (serialMismatch || nameBelongsToDifferentRow) {
-            return failure(422, {
-              title: 'Screenshot is from a different device',
-              reason: serialMismatch
-                ? `The serial number in your screenshot ("${aiResult.deviceSerial}") does not match the device registered for account "${account}".`
-                : `The device name in your screenshot ("${aiResult.deviceName}") is registered to a different account.`,
-              items: [{
-                check: serialMismatch ? 'Serial number does not match your registered device' : 'Device name belongs to another account',
-                guide: `Submit a screenshot taken on your own registered laptop. Also check that "${account}" is your own account. If you were issued a new or replacement device, ask your administrator to update the device serial in the tracking list, then submit again.`,
-              }],
-              suggestion: 'Nothing was saved. Once you are on the right device (or the record is updated), submit again.',
-            });
-          }
-        }
+    // Post-AI cross-validation: the serial in the image must be the one registered for THIS account.
+    const extractedSerial = normalizeSerial(aiResult.deviceSerial);
+    if (extractedSerial) {
+      const rowSerial = normalizeSerial(accountRow.serial);
+      if (!rowSerial) {
+        return failure(422, {
+          title: 'Device not registered',
+          reason: `No device serial number is registered for account "${account}", so your screenshot cannot be verified.`,
+          items: [{
+            check: 'No device serial registered for your account',
+            guide: 'Please contact your administrator for support: ask them to add your device serial number to the tracking list, then submit again.',
+          }],
+          suggestion: 'Nothing was saved.',
+        });
+      }
+      if (extractedSerial !== rowSerial) {
+        return failure(422, {
+          title: 'Screenshot is from a different device',
+          reason: `The serial number in your screenshot ("${aiResult.deviceSerial}") does not match the device registered for account "${account}".`,
+          items: [{
+            check: 'Serial number does not match your registered device',
+            guide: `Submit a screenshot taken on your own registered laptop, and check that "${account}" is your own account. If you were issued a new or replacement device, please contact your administrator to update the device serial in the tracking list, then submit again.`,
+          }],
+          suggestion: 'Nothing was saved. Once you are on the right device (or the record is updated), submit again.',
+        });
       }
     }
 
@@ -272,9 +277,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const failedChecks = aiResult.failedChecks ?? [];
     const [malwareAlerts, complianceCheck, seedConfiguration, operatingSystem] = buildSeedValues(aiResult);
 
-    // Accepted with 80-98% confidence (or no registered serial to compare): keep warnings for the admin only.
+    // Accepted with 80-98% confidence: keep warnings for the admin only.
     const warnings = decision.verdict === 'accept_warning' ? [...decision.warnings] : [];
-    if (serialUnverified) warnings.push('This account has no registered serial number, so the serial in the screenshot could not be verified.');
     const savedResult = { ...aiResult, warning: warnings.length > 0, warnings };
 
     const submission: Submission = {

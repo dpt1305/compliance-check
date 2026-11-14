@@ -1,6 +1,5 @@
 import { findAll } from '@/lib/db/submission-repo';
 import {
-  readAll,
   readActive,
   matchesTrackingRow,
   getDistinctProjects,
@@ -265,22 +264,14 @@ export function compareUserListRows(
 }
 
 export async function buildUserListEntries(): Promise<UserListEntry[]> {
-  const [trackingRows, submissions, allTrackingRows] = await Promise.all([
+  const [trackingRows, submissions] = await Promise.all([
     readActive(),
     findAll(),
-    readAll(),
   ]);
   const matchIndex = buildSubmissionMatchIndex(submissions);
 
   const entries: UserListEntry[] = [];
   const matchedSubmissionIds = new Set<number>();
-
-  const trackingIdentifiers = new Set<string>();
-  for (const row of allTrackingRows) {
-    if (row.account) trackingIdentifiers.add(normStr(row.account));
-    if (row.email) trackingIdentifiers.add(normStr(row.email));
-    if (row.serial) trackingIdentifiers.add(normStr(row.serial));
-  }
 
   for (const row of trackingRows) {
     const allMatches = getMatchesForTrackingRow(row, matchIndex, matchedSubmissionIds);
@@ -343,37 +334,8 @@ export async function buildUserListEntries(): Promise<UserListEntry[]> {
     });
   }
 
-  for (const submission of matchIndex.parsedSubmissions) {
-    if (matchedSubmissionIds.has(submission.id)) continue;
-
-    const normAccount = normStr(submission.account);
-    const normSerial = normStr(submission.deviceSerial);
-    if (
-      (normAccount && trackingIdentifiers.has(normAccount)) ||
-      (normSerial && trackingIdentifiers.has(normSerial))
-    ) {
-      continue;
-    }
-
-    entries.push({
-      source: 'submission',
-      name: submission.deviceName ?? submission.account,
-      account: submission.account,
-      submissionId: submission.id,
-      submissionType: submission.submissionType,
-      submissionStatus: submission.status,
-      submissionDate: submission.submissionDate,
-      imageUrl: submission.imageUrl,
-      confidenceScore: submission.confidenceScore,
-      deviceSerial: submission.deviceSerial ?? undefined,
-      deviceName: submission.deviceName ?? undefined,
-      validationResult: submission.validationResult ?? undefined,
-      malwareAlerts: submission.malwareAlerts,
-      complianceChecks: submission.complianceCheck,
-      seedConfiguration: submission.seedConfiguration,
-      operatingSystem: submission.operatingSystem,
-    });
-  }
+  // Submissions that match no tracking member are intentionally NOT listed: the list only shows users the
+  // admin registered. Unregistered users are rejected at submit time, and must never appear as new members.
 
   return entries;
 }
