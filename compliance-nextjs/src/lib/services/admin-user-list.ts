@@ -330,10 +330,12 @@ export async function buildUserListEntries(): Promise<UserListEntry[]> {
       serial: row.serial ?? undefined,
       trackingAccount: row.account ?? undefined,
       deviceType: row.deviceType ?? undefined,
-      malwareAlerts: row.malwareAlerts ?? undefined,
-      complianceChecks: row.complianceChecks ?? undefined,
-      seedConfiguration: row.seedConfiguration ?? undefined,
-      operatingSystem: row.operatingSystem ?? undefined,
+      // No submission → no scores. Any values stored on the tracking row are stale
+      // (left over from an earlier submission/review), so they must show as "—".
+      malwareAlerts: undefined,
+      complianceChecks: undefined,
+      seedConfiguration: undefined,
+      operatingSystem: undefined,
       followUpAction: row.followUpAction ?? undefined,
       responseFromTicket: row.responseFromTicket ?? undefined,
       trackingStatus: row.trackingStatus ?? undefined,

@@ -233,10 +233,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     'Follow up action', 'EVD / Ticket', 'Status', 'Note']);
 
   for (const r of rows) {
+    // Scores only exist once there is a submission; stored tracking values without one are stale.
+    const hasSubmission = rowIdToStatus.has(r.id);
     sheet.addRow([
       r.no ?? '', r.project ?? '', r.name ?? '', r.account ?? '', r.email ?? '', r.serial ?? '',
-      r.deviceType ?? '', exportIssueCount(r.malwareAlerts), exportIssueCount(r.complianceChecks),
-      exportIssueCount(r.seedConfiguration), exportIssueCount(r.operatingSystem), exportFollowUpAction(r.followUpAction),
+      r.deviceType ?? '',
+      hasSubmission ? exportIssueCount(r.malwareAlerts) : '',
+      hasSubmission ? exportIssueCount(r.complianceChecks) : '',
+      hasSubmission ? exportIssueCount(r.seedConfiguration) : '',
+      hasSubmission ? exportIssueCount(r.operatingSystem) : '',
+      exportFollowUpAction(r.followUpAction),
       'Refer photo captured in folder',
       deriveTrackingStatus(rowIdToStatus.get(r.id)),
       '',
