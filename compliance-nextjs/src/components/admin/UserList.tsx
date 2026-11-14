@@ -1981,7 +1981,23 @@ export default function UserList() {
       </div>
 
       {/* Table */}
-      <div className="card overflow-x-auto">
+      <div
+        className="card overflow-x-auto relative"
+        aria-busy={isLoading}
+      >
+        {/* Full-table loading overlay: blocks all interaction while reloading */}
+        {isLoading && (
+          <div
+            className="absolute inset-0 z-20 flex items-start justify-center pt-16 bg-white/70 backdrop-blur-[1px] cursor-wait"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-white shadow border border-gray-200 text-sm text-gray-600">
+              <span className="spinner w-4 h-4 border-gray-300 border-t-primary-500"></span>
+              Loading…
+            </div>
+          </div>
+        )}
         <table
           className="data-table text-xs"
           style={{
