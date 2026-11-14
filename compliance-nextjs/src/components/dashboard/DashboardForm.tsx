@@ -109,6 +109,8 @@ export default function DashboardForm() {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [supportedTypes, setSupportedTypes] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Border colour after a submit: green = accepted, red = error/rejected. Cleared when the image changes.
+  const [scanOutcome, setScanOutcome] = useState<'ok' | 'err' | null>(null);
   const [result, setResult] = useState<SubmissionResponse | null>(null);
   const [memberRow, setMemberRow] = useState<MemberRow | null>(null);
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
@@ -124,6 +126,7 @@ export default function DashboardForm() {
 
   const applyFile = useCallback(async (f: File) => {
     setFile(f);
+    setScanOutcome(null);
     setFileTouched(true);
     setFileValidating(true);
     // Create preview URL (revoke previous one first)
@@ -159,6 +162,7 @@ export default function DashboardForm() {
     e.preventDefault();
     e.stopPropagation();
     setFile(null);
+    setScanOutcome(null);
     setFileError(null);
     setFileTouched(false);
     setImagePreview(prev => { if (prev) URL.revokeObjectURL(prev); return null; });
@@ -185,6 +189,9 @@ export default function DashboardForm() {
     }
 
     setIsSubmitting(true);
+    setScanOutcome(null);
+    // Keep the scan visible for at least one full sweep, even when the API answers instantly.
+    const minScan = new Promise<void>(r => setTimeout(r, 2200));
     const fd = new FormData();
     fd.append('account', account.trim());
     fd.append('submissionType', submissionType);
@@ -193,7 +200,9 @@ export default function DashboardForm() {
     try {
       const res = await fetch('/api/submission', { method: 'POST', body: fd });
       const data = await res.json() as SubmissionResponse & { message?: string };
-      if (!res.ok) { showToast(data.message ?? 'Submission failed', false); return; }
+      await minScan;
+      if (!res.ok) { setScanOutcome('err'); showToast(data.message ?? 'Submission failed', false); return; }
+      setScanOutcome(data.status === 'REJECTED' ? 'err' : 'ok');
       setResult(data);
       setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
       if (data.status !== 'REJECTED') {
@@ -207,6 +216,8 @@ export default function DashboardForm() {
         showToast('Validation failed. Please fix the issues and try again.', false);
       }
     } catch {
+      await minScan;
+      setScanOutcome('err');
       showToast('Submission failed. Please try again.', false);
     } finally {
       setIsSubmitting(false);
@@ -332,8 +343,15 @@ export default function DashboardForm() {
                 const f = e.dataTransfer.files?.[0];
                 if (f) await applyFile(f);
               }}
-              className={`flex flex-col items-center justify-center gap-3 w-full rounded-xl border-2 border-dashed cursor-pointer transition-colors px-6 py-8
-                ${isDragging
+              className={`flex flex-col items-center justify-center gap-3 w-full rounded-xl border-2 cursor-pointer transition-colors px-6 py-8
+                ${isSubmitting
+                  ? 'border-dashed border-primary-500 bg-primary-50'
+                  : scanOutcome === 'ok'
+                    ? 'border-solid border-green-500 bg-green-50 ring-4 ring-green-500/20'
+                    : scanOutcome === 'err'
+                      ? 'border-solid border-red-500 bg-red-50 ring-4 ring-red-500/20 scan-shake'
+                      : 'border-dashed'}
+                ${isSubmitting || scanOutcome ? '' : isDragging
                   ? 'border-primary-500 bg-primary-50'
                   : fileTouched && fileError
                     ? 'border-red-400 bg-red-50'
@@ -350,12 +368,20 @@ export default function DashboardForm() {
               ) : file && !fileError ? (
                 <>
                   {imagePreview && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={imagePreview}
-                      alt="Preview"
-                      className="max-h-40 max-w-full rounded-lg object-contain shadow-sm"
-                    />
+                    <div className="relative inline-block max-w-full overflow-hidden rounded-lg leading-none shadow-sm">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={imagePreview}
+                        alt="Preview"
+                        className="max-h-40 max-w-full object-contain"
+                      />
+                      {isSubmitting && (
+                        <div className="scan-layer" aria-hidden="true">
+                          <div className="scan-dim" />
+                          <div className="scan-line" />
+                        </div>
+                      )}
+                    </div>
                   )}
                   <div className="text-center">
                     <p className="text-sm font-medium text-gray-800 break-all">{file.name}</p>
