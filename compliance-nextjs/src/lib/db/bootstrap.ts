@@ -53,8 +53,8 @@ async function bootstrapMongo(): Promise<void> {
   await initDefaultAdmin();
   await backfillSubmissionCreatedAt();
 
-  const { ensureS3LifecycleRule } = await import('@/lib/utils/file-storage');
-  await ensureS3LifecycleRule();
+  const { ensureStorageLifecycleRule } = await import('@/lib/utils/file-storage');
+  await ensureStorageLifecycleRule();
 }
 
 export async function ensureDbReady(): Promise<void> {

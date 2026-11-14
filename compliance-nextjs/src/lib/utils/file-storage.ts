@@ -9,29 +9,47 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
-// ── S3 helpers ────────────────────────────────────────────────────────────────
+// ── Cloudflare R2 helpers (S3-compatible API) ─────────────────────────────────
 //
-// Credential resolution order (handled automatically by the AWS SDK):
-//   1. Environment variables — AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY
-//      → used for local development (set in .env.local)
-//   2. ~/.aws/credentials file
-//      → alternative for local dev via `aws configure`
-//   3. EC2 Instance Metadata Service (IMDS)
-//      → used automatically in production when an IAM Role is attached to the instance
-//      → no credentials needed in .env.production
+// R2 is accessed through the AWS S3 SDK with a custom endpoint:
+//   https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com
+// Credentials are an R2 API token (Access Key ID + Secret) — there is no
+// instance-role fallback like on AWS, so the keys must be set in the env.
 //
-// To switch between local and EC2: simply omit AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
-// from .env.production and attach the IAM Role to the EC2 instance instead.
+// Required env: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET
+// Optional env: R2_PREFIX (default "images") — object key = <prefix>/<savedName>
+// When R2_BUCKET is unset the app falls back to the local ./data/images folder.
+
+let cachedClient: S3Client | null = null;
 
 function s3Client(): S3Client | null {
-  if (!process.env.AWS_S3_BUCKET) return null;
-  return new S3Client({ region: process.env.AWS_REGION ?? 'ap-southeast-1' });
+  if (!process.env.R2_BUCKET) return null;
+  if (cachedClient) return cachedClient;
+
+  const accountId = process.env.R2_ACCOUNT_ID;
+  const accessKeyId = process.env.R2_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
+  if (!accountId || !accessKeyId || !secretAccessKey) {
+    throw new Error(
+      'R2_BUCKET is set but R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY is missing',
+    );
+  }
+
+  cachedClient = new S3Client({
+    region: 'auto',
+    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+    credentials: { accessKeyId, secretAccessKey },
+    // R2 does not need the newer default CRC32 checksums on every request.
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
+  });
+  return cachedClient;
 }
 
-function bucket(): string { return process.env.AWS_S3_BUCKET ?? ''; }
+function bucket(): string { return process.env.R2_BUCKET ?? ''; }
 
 function s3Key(savedName: string): string {
-  const prefix = (process.env.AWS_S3_PREFIX ?? 'images').replace(/\/$/, '');
+  const prefix = (process.env.R2_PREFIX ?? 'images').replace(/\/$/, '');
   return `${prefix}/${savedName}`;
 }
 
@@ -136,17 +154,19 @@ export async function deleteImage(savedName: string): Promise<void> {
   } catch { /* already gone */ }
 }
 
-// ── S3 Lifecycle Rule (TTL) ───────────────────────────────────────────────────
+// ── R2 Lifecycle Rule (TTL) ───────────────────────────────────────────────────
 
 /**
- * Idempotently applies an S3 lifecycle rule that automatically expires objects
+ * Idempotently applies a lifecycle rule that automatically expires objects
  * under the configured prefix after SUBMISSION_TTL_DAYS days (default: 90).
  *
- * No-op when S3 is not configured (AWS_S3_BUCKET is unset).
+ * No-op when R2 is not configured (R2_BUCKET is unset).
  *
- * IAM requirement: the role/user must have s3:PutLifecycleConfiguration on the bucket.
+ * The R2 API token needs "Admin Read & Write" (bucket-level) permission to set
+ * lifecycle rules; with "Object Read & Write" only, this logs an error and the
+ * app keeps working (set the rule once in the Cloudflare dashboard instead).
  */
-export async function ensureS3LifecycleRule(): Promise<void> {
+export async function ensureStorageLifecycleRule(): Promise<void> {
   const client = s3Client();
   if (!client) return; // local filesystem — nothing to do
 
@@ -155,7 +175,7 @@ export async function ensureS3LifecycleRule(): Promise<void> {
     return Number.isFinite(d) && d > 0 ? d : 90;
   })();
 
-  const prefix = (process.env.AWS_S3_PREFIX ?? 'images').replace(/\/$/, '') + '/';
+  const prefix = (process.env.R2_PREFIX ?? 'images').replace(/\/$/, '') + '/';
 
   try {
     await client.send(new PutBucketLifecycleConfigurationCommand({
@@ -171,9 +191,9 @@ export async function ensureS3LifecycleRule(): Promise<void> {
         ],
       },
     }));
-    console.log(`[s3-lifecycle] Set expiry rule: s3://${bucket()}/${prefix}* expires after ${ttlDays} day(s)`);
+    console.log(`[r2-lifecycle] Set expiry rule: ${bucket()}/${prefix}* expires after ${ttlDays} day(s)`);
   } catch (err) {
     // Non-fatal — log and continue. The app still works without the lifecycle rule.
-    console.error('[s3-lifecycle] Failed to set lifecycle rule:', (err as Error).message);
+    console.error('[r2-lifecycle] Failed to set lifecycle rule:', (err as Error).message);
   }
 }
