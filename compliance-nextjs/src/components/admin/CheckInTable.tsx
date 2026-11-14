@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import MultiSelectDropdown from './MultiSelectDropdown';
 import { useAdminEvents } from '@/hooks/useAdminEvents';
+import { buildProjectMatcher, dedupeProjects } from '@/lib/utils/project-filter';
 
 type Status = 'PENDING' | 'APPROVED' | 'REJECTED';
 type CellStatus = Status | 'MISSING';
@@ -51,8 +52,9 @@ export default function CheckInTable() {
   // Real-time updates via SSE — reloads whenever tracking or submission data changes.
   useAdminEvents({ onTracking: loadData, onSubmissions: loadData });
 
+  const matchesProject = buildProjectMatcher(projectFilter);
   const filteredEntries = entries.filter(e => {
-    if (projectFilter !== null && !projectFilter.includes(e.project ?? '')) return false;
+    if (matchesProject && !matchesProject(e.project)) return false;
     if (statusFilter && e.status !== statusFilter) return false;
     if (dateFrom && e.submissionDate < dateFrom) return false;
     if (dateTo && e.submissionDate > dateTo + 'T23:59:59') return false;
@@ -62,7 +64,7 @@ export default function CheckInTable() {
   const accounts = [...new Set(filteredEntries.map(e => e.account))].sort();
   const types = [...new Set(filteredEntries.map(e => e.submissionType))].sort();
   const allTypes = [...new Set(entries.map(e => e.submissionType))].sort();
-  const availableProjects = [...new Set(entries.map(e => e.project ?? '').filter(Boolean))].sort();
+  const availableProjects = dedupeProjects(entries.map(e => e.project));
 
   const matrix: Record<string, Record<string, CheckInEntry>> = {};
   for (const e of filteredEntries) {
@@ -93,6 +95,7 @@ export default function CheckInTable() {
           selected={projectFilter}
           onChange={setProjectFilter}
           placeholder="All projects"
+          emptyMeansAll
           className="w-48"
         />
         <select className="form-select w-40" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>

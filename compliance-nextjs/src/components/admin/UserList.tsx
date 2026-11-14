@@ -369,6 +369,9 @@ export default function UserList() {
     filterTags,
   });
 
+  const loadSeqRef = useRef(0);
+  const loadAbortRef = useRef<AbortController | null>(null);
+
   const loadPage = useCallback(async (offset: number, reset: boolean) => {
     const { filterProjects, filterMonth, filterYear, filterTags } =
       filterStateRef.current;
@@ -381,11 +384,21 @@ export default function UserList() {
     if (filterYear) params.set("year", filterYear);
     filterTags.forEach((t) => params.append("tag", t));
 
+    // A reset load (filter change / refresh) supersedes anything in flight: abort the
+    // older request and ignore its response so stale data can never overwrite newer filters.
+    const requestId = reset ? ++loadSeqRef.current : loadSeqRef.current;
+    if (reset) {
+      loadAbortRef.current?.abort();
+      loadAbortRef.current = new AbortController();
+    }
+    const signal = loadAbortRef.current?.signal;
+
     if (reset) setIsLoading(true);
     else setIsFetchingMore(true);
     try {
       const res = await fetch(`/api/admin/user-list?${params}`, {
         headers: authHeaders(),
+        signal,
       });
       if (!res.ok) throw new Error("Failed");
       const d = (await res.json()) as {
@@ -394,6 +407,7 @@ export default function UserList() {
         projects: string[];
         summary: { approved: number; submitted: number; notSubmitted: number };
       };
+      if (requestId !== loadSeqRef.current) return; // superseded by a newer request
       if (reset) {
         setItems(d.items);
         setColWidths(computeColWidths(d.items));
@@ -407,12 +421,16 @@ export default function UserList() {
       setTotal(d.total);
       setSummary(d.summary);
       if (d.projects.length > 0) setAvailableProjects(d.projects);
-    } catch {
+    } catch (err) {
+      if ((err as Error).name === "AbortError") return; // superseded, not a failure
+      if (requestId !== loadSeqRef.current) return;
       setToast({ msg: "Failed to load user list", ok: false });
       setTimeout(() => setToast(null), 3500);
     } finally {
-      setIsLoading(false);
-      setIsFetchingMore(false);
+      if (requestId === loadSeqRef.current) {
+        setIsLoading(false);
+        setIsFetchingMore(false);
+      }
     }
   }, []); // stable — reads filters via ref
 
@@ -1753,6 +1771,7 @@ export default function UserList() {
           selected={filterProjects}
           onChange={setFilterProjects}
           placeholder="All projects"
+          emptyMeansAll
           className="w-48"
         />
 

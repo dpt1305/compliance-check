@@ -6,12 +6,14 @@ interface Props {
   options: string[];
   /**
    * null  = "Select All" ON  — no filter, show all rows
-   * []    = "Select All" OFF — none selected (filter shows nothing)
+   * []    = "Select All" OFF, nothing ticked (callers decide the meaning; see emptyMeansAll)
    * [...] = filter to these specific items
    */
   selected: string[] | null;
   onChange: (selected: string[] | null) => void;
   placeholder?: string;   // shown when all selected (null)
+  /** When true, an empty selection reads as "no filter" (placeholder) instead of "None selected". */
+  emptyMeansAll?: boolean;
   className?: string;
 }
 
@@ -29,6 +31,7 @@ export default function MultiSelectDropdown({
   selected,
   onChange,
   placeholder = 'All',
+  emptyMeansAll = false,
   className = 'w-48',
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -87,9 +90,11 @@ export default function MultiSelectDropdown({
     return allSelected || (selected?.includes(opt) ?? false);
   }
 
-  // Button label
+  // Button label. For filters, an empty selection applies no filter (every row is shown), so
+  // the label must say so — "None selected" beside a full list was the misleading state users hit.
+  const noFilter = allSelected || (emptyMeansAll && selected!.length === 0);
   const label =
-    allSelected
+    noFilter
       ? placeholder
       : selected!.length === 0
       ? 'None selected'
@@ -104,7 +109,7 @@ export default function MultiSelectDropdown({
         className="form-select w-full text-left flex items-center justify-between gap-1 text-sm"
         onClick={() => { setOpen(v => !v); if (!open) setSearch(''); }}
       >
-        <span className={allSelected ? 'text-gray-400' : 'text-gray-800 truncate'}>{label}</span>
+        <span className={noFilter ? 'text-gray-400' : 'text-gray-800 truncate'}>{label}</span>
         <svg
           className={`w-4 h-4 text-gray-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
           fill="none" stroke="currentColor" viewBox="0 0 24 24"
