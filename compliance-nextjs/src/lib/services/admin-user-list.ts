@@ -205,10 +205,17 @@ export function getMatchesForTrackingRow(
   );
 }
 
-function pickBest<T extends { id: number; submissionDate: string }>(list: T[]): T {
-  return list.slice().sort((a, b) =>
-    new Date(b.submissionDate).getTime() - new Date(a.submissionDate).getTime()
-  )[0];
+/**
+ * Representative submission for a member: an APPROVED one always wins (so an admin
+ * approval is never hidden by a later duplicate/resubmission); otherwise the most recent.
+ */
+function pickBest<T extends { id: number; status?: string; submissionDate: string }>(list: T[]): T {
+  const isApproved = (s: T) => s.status?.toUpperCase() === 'APPROVED';
+  return list.slice().sort((a, b) => {
+    const approvedDiff = Number(isApproved(b)) - Number(isApproved(a));
+    if (approvedDiff !== 0) return approvedDiff;
+    return new Date(b.submissionDate).getTime() - new Date(a.submissionDate).getTime();
+  })[0];
 }
 
 function sortValue(row: UserListEntry, col: string): string {

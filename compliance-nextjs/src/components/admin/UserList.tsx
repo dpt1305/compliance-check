@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import MultiSelectDropdown from "./MultiSelectDropdown";
 import TypeCombobox from "./TypeCombobox";
-import { useAdminEvents } from "@/hooks/useAdminEvents";
+import { useAutoRefresh, isTypingInField } from "@/hooks/useAutoRefresh";
 
 const PAGE_SIZE = 50; // items per page (passed to API as limit)
 
@@ -185,6 +185,21 @@ function authHeaders(extra?: Record<string, string>) {
 }
 
 const STATUS_OPTIONS = ["PENDING", "APPROVED", "REJECTED"] as const;
+
+/**
+ * Row background by submission status — soft tints (hover goes one shade deeper):
+ * APPROVED → green, PENDING → yellow, REJECTED / not submitted → light red.
+ */
+function rowStatusClass(status: string | undefined): string {
+  switch ((status ?? "").toUpperCase()) {
+    case "APPROVED":
+      return "bg-green-50 [&:hover>td]:!bg-green-100";
+    case "PENDING":
+      return "bg-yellow-50 [&:hover>td]:!bg-yellow-100";
+    default: // REJECTED, NOT_SUBMITTED or no submission
+      return "bg-red-50 [&:hover>td]:!bg-red-100";
+  }
+}
 
 function statusBadge(s: string | undefined) {
   if (!s || s === "NOT_SUBMITTED") return "badge-missing";
@@ -372,7 +387,7 @@ export default function UserList() {
   const loadSeqRef = useRef(0);
   const loadAbortRef = useRef<AbortController | null>(null);
 
-  const loadPage = useCallback(async (offset: number, reset: boolean) => {
+  const loadPage = useCallback(async (offset: number, reset: boolean, silent = false) => {
     const { filterProjects, filterMonth, filterYear, filterTags } =
       filterStateRef.current;
     const params = new URLSearchParams();
@@ -393,8 +408,10 @@ export default function UserList() {
     }
     const signal = loadAbortRef.current?.signal;
 
-    if (reset) setIsLoading(true);
-    else setIsFetchingMore(true);
+    // silent = background auto-refresh: no spinner, so the table doesn't flash or lose scroll.
+    if (reset) {
+      if (!silent) setIsLoading(true);
+    } else setIsFetchingMore(true);
     try {
       const res = await fetch(`/api/admin/user-list?${params}`, {
         headers: authHeaders(),
@@ -424,8 +441,10 @@ export default function UserList() {
     } catch (err) {
       if ((err as Error).name === "AbortError") return; // superseded, not a failure
       if (requestId !== loadSeqRef.current) return;
-      setToast({ msg: "Failed to load user list", ok: false });
-      setTimeout(() => setToast(null), 3500);
+      if (!silent) {
+        setToast({ msg: "Failed to load user list", ok: false });
+        setTimeout(() => setToast(null), 3500);
+      }
     } finally {
       if (requestId === loadSeqRef.current) {
         setIsLoading(false);
@@ -479,8 +498,28 @@ export default function UserList() {
     }
   }
 
-  // Real-time updates via SSE — instantly reloads when tracking or submissions change.
-  useAdminEvents({ onTracking: loadData, onSubmissions: loadData });
+  // Auto-refresh once a minute, but never while the admin is mid-edit (inline cell edit,
+  // any open modal, a save/upload in progress, or typing in a field).
+  const busyRef = useRef(false);
+  busyRef.current =
+    editCell !== null ||
+    isSavingCell ||
+    editRow !== null ||
+    reviewIdx !== null ||
+    reviewSeedEdit !== null ||
+    isReviewSaving ||
+    isSeedSaving ||
+    showAddMemberModal ||
+    isSavingMember ||
+    isUploading ||
+    isDownloading ||
+    isClearing ||
+    isLoading ||
+    isFetchingMore ||
+    tagInput.trim() !== "";
+  useAutoRefresh(() => loadPage(0, true, true), {
+    isBusy: () => busyRef.current || isTypingInField(),
+  });
 
   // Infinite scroll sentinel
   const hasMore = items.length < total;
@@ -2025,12 +2064,7 @@ export default function UserList() {
               sortedItems.map((row, idx) => (
                 <tr
                   key={row.submissionId ?? `tr-${row.trackingNo ?? idx}`}
-                  className={
-                    !row.submissionStatus ||
-                    row.submissionStatus === "NOT_SUBMITTED"
-                      ? "bg-red-50"
-                      : ""
-                  }
+                  className={rowStatusClass(row.submissionStatus)}
                 >
                   {/* No. — not editable */}
                   <td className="text-gray-400 font-medium border-r border-gray-200">

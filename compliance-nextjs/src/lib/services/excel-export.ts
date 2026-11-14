@@ -2,8 +2,9 @@ import ExcelJS from 'exceljs';
 import type { UserListEntry } from './admin-user-list';
 
 export function exportStatus(row: UserListEntry): string {
+  // An admin approval always exports as OK, even if a stale tracking status says otherwise.
+  if (row.submissionStatus?.toUpperCase() === 'APPROVED') return 'OK';
   if (row.trackingStatus?.trim()) return row.trackingStatus;
-  if (row.submissionStatus === 'APPROVED') return 'OK';
   if (row.submissionStatus && row.submissionStatus !== 'NOT_SUBMITTED') return 'Rejected';
   return '';
 }
