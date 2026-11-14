@@ -12,12 +12,14 @@ export function exportIssueCount(value: string | null | undefined): string {
   const trimmed = value?.trim() ?? '';
   if (!trimmed) return '';
   const actionCount = trimmed.match(/^(\d+)\s*actions?$/i);
+  if (actionCount && actionCount[1] === '0') return '';
   return actionCount ? actionCount[1] : trimmed;
 }
 
 export function exportFollowUpAction(value: string | null | undefined): string {
   const trimmed = value?.trim() ?? '';
-  return trimmed || 'No action required';
+  if (!trimmed || /^0\s*actions?$/i.test(trimmed)) return 'No actions required';
+  return trimmed;
 }
 
 export async function generateReport(entries: UserListEntry[]): Promise<Buffer> {
@@ -45,7 +47,7 @@ export async function generateReport(entries: UserListEntry[]): Promise<Buffer> 
   const headerRow = sheet.getRow(1);
   headerRow.eachCell(cell => {
     cell.font = { bold: true };
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB8CCE4' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF008000' } };
     cell.alignment = { vertical: 'middle', horizontal: 'center' };
     cell.border = {
       top: { style: 'thin' },
