@@ -13,29 +13,15 @@ function toNumberOnly(s: string | number | null | undefined): string {
   return m ? m[0] : '0';
 }
 
+/** The submission was already verified against this account, so only an exact account match may be updated. */
 function matchesDevice(
-  extractedSerial: string | null | undefined,
-  extractedName: string | null | undefined,
+  _extractedSerial: string | null | undefined,
+  _extractedName: string | null | undefined,
   submissionAccount: string,
   row: TrackingMember,
 ): boolean {
-  const serial = norm(extractedSerial);
-  const name   = norm(extractedName);
-  const acct   = norm(submissionAccount);
-
-  if (serial && norm(row.serial) === serial) return true;
-  if (serial && norm(row.serial).includes(serial)) return true;
-
-  if (acct) {
-    if (row.account && norm(row.account) === acct) return true;
-    if (row.email   && norm(row.email)   === acct) return true;
-    if (row.name    && norm(row.name)    === acct) return true;
-  }
-
-  if (name && norm(row.name) === name) return true;
-  if (serial && row.email && norm(row.email).includes(serial)) return true;
-
-  return false;
+  const acct = norm(submissionAccount);
+  return !!acct && !row.removedFromTracking && norm(row.account) === acct;
 }
 
 function extractNumber(text: string, keywords: string[]): string {

@@ -191,6 +191,25 @@ const STATUS_OPTIONS = ["PENDING", "APPROVED", "REJECTED"] as const;
  * APPROVED → green, PENDING → yellow, REJECTED → stronger red (real problem),
  * not submitted → no tint (white).
  */
+/** Admin-facing names for the AI checklist keys (same criteria the user must satisfy when submitting). */
+const CHECKLIST_ADMIN_LABELS: Record<string, string> = {
+  hasDashboard: "SEED dashboard (device info + 4 counters)",
+  hasSeedDashboard: "SEED dashboard (device info + 4 counters)",
+  hasClock: "System clock on the taskbar",
+  hasTimestamp: "System clock on the menu bar",
+  hasWindowsUpdate: "Windows Update shows \"You're up to date\"",
+  hasDeviceName: "Device name (complete, not masked)",
+  hasDeviceSerial: "Device serial (complete, consistent)",
+  hasMacInfo: "About This Mac (model + complete serial)",
+  hasFullScan: "Windows Security full scan result",
+  hasSerialNumber: "Serial number in terminal (complete)",
+  hasTrellix: "Trellix status",
+};
+
+function normalizeSerialText(value: string | null | undefined): string {
+  return (value ?? "").replace(/[\s\u00A0\u200B]+/g, "").toUpperCase();
+}
+
 function rowStatusClass(status: string | undefined): string {
   switch ((status ?? "").toUpperCase()) {
     case "APPROVED":
@@ -1271,6 +1290,23 @@ export default function UserList() {
           const aiReason = (aiResult?.reason as string | undefined) ?? "";
           const aiSuggestion =
             (aiResult?.suggestion as string | undefined) ?? "";
+          const evidence = (aiResult?.evidence ?? {}) as Record<string, string>;
+          const warningList: string[] = Array.isArray(aiResult?.warnings)
+            ? (aiResult.warnings as string[]).filter(Boolean)
+            : [];
+          const confidenceValue: number | null =
+            typeof aiResult?.confidence === "number"
+              ? (aiResult.confidence as number)
+              : typeof row.confidenceScore === "number"
+                ? row.confidenceScore
+                : null;
+          const aiSerial = (aiResult?.deviceSerial as string | undefined) ?? "";
+          const aiDeviceName = (aiResult?.deviceName as string | undefined) ?? "";
+          const registeredSerial = (row.serial as string | undefined) ?? "";
+          const serialMatches =
+            aiSerial && registeredSerial
+              ? normalizeSerialText(aiSerial) === normalizeSerialText(registeredSerial)
+              : null;
           const hasPrev = reviewIdx > 0;
           const hasNext = reviewIdx < reviewItems.length - 1;
 
@@ -1555,6 +1591,78 @@ export default function UserList() {
                       )}
                     </section>
 
+                    {/* Confidence + warning */}
+                    {(confidenceValue != null || warningList.length > 0) && (
+                      <section>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                            AI Confidence
+                          </h3>
+                          {confidenceValue != null && (
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                                confidenceValue >= 99
+                                  ? "bg-green-100 text-green-800"
+                                  : confidenceValue >= 80
+                                    ? "bg-yellow-100 text-yellow-800"
+                                    : "bg-red-100 text-red-800"
+                              }`}
+                            >
+                              {confidenceValue}%
+                            </span>
+                          )}
+                        </div>
+                        {warningList.length > 0 && (
+                          <div className="mt-2 rounded border border-yellow-300 bg-yellow-50 p-2 text-yellow-900">
+                            <p className="font-semibold">
+                              ⚠ Review carefully — the AI was not fully confident
+                            </p>
+                            <ul className="list-disc list-inside mt-1 space-y-0.5">
+                              {warningList.map((w, i) => (
+                                <li key={i}>{w}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </section>
+                    )}
+
+                    {/* Device identity read by the AI */}
+                    {(aiSerial || aiDeviceName) && (
+                      <section>
+                        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                          Device read by AI
+                        </h3>
+                        <dl className="space-y-0.5">
+                          {aiDeviceName && (
+                            <div className="flex gap-2">
+                              <dt className="text-gray-500 w-20 shrink-0">Name</dt>
+                              <dd className="text-gray-800 break-all">{aiDeviceName}</dd>
+                            </div>
+                          )}
+                          {aiSerial && (
+                            <div className="flex gap-2 items-start">
+                              <dt className="text-gray-500 w-20 shrink-0">Serial</dt>
+                              <dd className="text-gray-800 break-all">
+                                {aiSerial}
+                                {serialMatches === true && (
+                                  <span className="ml-2 text-green-600">✓ matches registered serial</span>
+                                )}
+                                {serialMatches === false && (
+                                  <span className="ml-2 text-red-600">
+                                    ✗ registered: {registeredSerial}
+                                  </span>
+                                )}
+                                {serialMatches === null && (
+                                  <span className="ml-2 text-yellow-700">no registered serial to compare</span>
+                                )}
+                              </dd>
+                            </div>
+                          )}
+                        </dl>
+                      </section>
+                    )}
+
                     {/* AI reason */}
                     {aiReason && (
                       <section>
@@ -1567,29 +1675,28 @@ export default function UserList() {
                       </section>
                     )}
 
-                    {/* Checklist */}
+                    {/* Checklist — same criteria the user must meet when submitting */}
                     {checklistEntries.length > 0 && (
                       <section>
                         <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
                           Checklist
                         </h3>
-                        <ul className="space-y-1">
+                        <ul className="space-y-1.5">
                           {checklistEntries.map(([key, passed]) => (
-                            <li key={key} className="flex items-center gap-1.5">
-                              <span
-                                className={
-                                  passed ? "text-green-500" : "text-red-500"
-                                }
-                              >
-                                {passed ? "✓" : "✗"}
-                              </span>
-                              <span
-                                className={
-                                  passed ? "text-gray-600" : "text-red-600"
-                                }
-                              >
-                                {key}
-                              </span>
+                            <li key={key}>
+                              <div className="flex items-center gap-1.5">
+                                <span className={passed ? "text-green-500" : "text-red-500"}>
+                                  {passed ? "✓" : "✗"}
+                                </span>
+                                <span className={passed ? "text-gray-700" : "text-red-600 font-medium"}>
+                                  {CHECKLIST_ADMIN_LABELS[key] ?? key}
+                                </span>
+                              </div>
+                              {evidence[key] && (
+                                <p className="ml-5 text-gray-500 italic break-words">
+                                  AI read: {evidence[key]}
+                                </p>
+                              )}
                             </li>
                           ))}
                         </ul>
@@ -1983,6 +2090,7 @@ export default function UserList() {
       {/* Table */}
       <div
         className="card overflow-x-auto relative"
+        style={isLoading ? { minHeight: 260 } : undefined}
         aria-busy={isLoading}
       >
         {/* Full-table loading overlay: blocks all interaction while reloading */}
