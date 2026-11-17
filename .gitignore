@@ -1,1 +1,5 @@
 /.opencode/
+
+# AI evaluation (testing only): images, script, reports, logs
+/testing-crops/
+/compliance-nextjs/scripts/ai-eval/
