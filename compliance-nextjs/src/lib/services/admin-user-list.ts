@@ -263,7 +263,18 @@ export function compareUserListRows(
   return sortDir === 'asc' ? cmp : -cmp;
 }
 
-export async function buildUserListEntries(): Promise<UserListEntry[]> {
+function isInPeriod(submissionDate: string, period: { month: number; year: number }): boolean {
+  const d = new Date(submissionDate);
+  return d.getMonth() + 1 === period.month && d.getFullYear() === period.year;
+}
+
+/**
+ * @param period when given, the representative submission is chosen among submissions of that month only,
+ * so an older APPROVED submission can never hide a submission made in the selected period.
+ */
+export async function buildUserListEntries(
+  period?: { month: number; year: number } | null,
+): Promise<UserListEntry[]> {
   const [trackingRows, submissions] = await Promise.all([
     readActive(),
     findAll(),
@@ -276,10 +287,12 @@ export async function buildUserListEntries(): Promise<UserListEntry[]> {
   for (const row of trackingRows) {
     const allMatches = getMatchesForTrackingRow(row, matchIndex, matchedSubmissionIds);
 
-    if (allMatches.length > 0) {
-      for (const match of allMatches) matchedSubmissionIds.add(match.id);
+    // Claim every match so another member can't take it, but only submissions of the selected month count.
+    for (const match of allMatches) matchedSubmissionIds.add(match.id);
+    const candidates = period ? allMatches.filter(m => isInPeriod(m.submissionDate, period)) : allMatches;
 
-      const best = pickBest(allMatches);
+    if (candidates.length > 0) {
+      const best = pickBest(candidates);
       entries.push({
         source: 'both',
         trackingRowNum: row.id,
@@ -391,7 +404,10 @@ export async function getUserListData(query: UserListQuery = {}): Promise<UserLi
   const sortCol = query.sortCol;
   const sortDir = query.sortDir ?? 'asc';
 
-  let result = filterUserListEntries(await buildUserListEntries(), query);
+  const { month, year } = query;
+  const period =
+    month != null && year != null && month >= 1 && month <= 12 && year > 0 ? { month, year } : null;
+  let result = filterUserListEntries(await buildUserListEntries(period), query);
   if (sortCol) {
     result = [...result].sort((a, b) => compareUserListRows(a, b, sortCol, sortDir));
   }
