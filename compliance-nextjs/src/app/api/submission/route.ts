@@ -3,7 +3,10 @@ import { validateImageBuffer } from '@/lib/utils/magic-bytes';
 import { storeImage, getPublicUrl } from '@/lib/utils/file-storage';
 import { generateSavedName } from '@/lib/utils/image-rename';
 import { isTypeSupported, getAllowedExtensions } from '@/lib/services/excel-mapping';
-import { validateImage } from '@/lib/services/ai-validation';
+import { runValidation } from '@/lib/services/ai-validation';
+import sharp from 'sharp';
+import { SubmissionTrace, runWithTrace, currentTrace, trace } from '@/lib/services/submission-log';
+import type { SubmissionLogOutcome } from '@/lib/db/mongo/submission-log-repo';
 import { decide, normalizeSerial, CONFIDENCE_REJECT_BELOW } from '@/lib/services/validation-policy';
 import { save } from '@/lib/db/submission-repo';
 import type { Submission } from '@/lib/storage/json-storage';
@@ -42,7 +45,7 @@ const CHECKLIST_GUIDES: Record<string, string> = {
   hasWindowsUpdate:    'Open Settings > Windows Update, install any pending updates and restart, then screenshot the page showing "You\'re up to date".',
   hasDeviceName:       'Make sure the complete device name is visible: not masked, blacked-out, cut off or covered by another window (Settings > System > About, or the SEED page).',
   hasDeviceSerial:     'Make sure the complete serial number is visible: not masked, blurred, cut off or covered by another window.',
-  hasDashboard:        'Open the SEED dashboard and capture it in full so all four counters (Malware Alerts, Compliance Checks, SEED Configuration, Operating System) are readable.',
+  hasDashboard:        'Open the SEED dashboard and capture it in full so all four counters (Security Alerts, Compliance Checks, SEED Configuration, Operating System) are readable.',
   hasTrellix:          'Open Trellix and capture the window showing the status "ok" / "turned on". If it is off or shows a warning, fix that first and then retake the screenshot.',
   hasSeedDashboard:    'Open the SEED dashboard and capture it with the device name, serial number and all counters visible.',
   hasTimestamp:        'Include the macOS menu bar so the system clock is readable. Dates inside web pages (for example a page footer) do not count.',
@@ -59,6 +62,15 @@ const CHECKLIST_GUIDES: Record<string, string> = {
 CHECKLIST_LABELS.hasFullScan = 'Full scan result not visible or the scan has not completed';
 
 interface FailedItem { check: string; guide: string }
+
+/** Log category for an early / error response, derived from its status and title. */
+function outcomeFor(status: number, title?: string): SubmissionLogOutcome {
+  if (status >= 500) return title === 'Validation service unavailable' ? 'AI_UNAVAILABLE' : 'SERVER_ERROR';
+  if (title === 'User not found') return 'USER_NOT_FOUND';
+  if (title === 'Device not registered') return 'NO_SERIAL_REGISTERED';
+  if (title === 'Screenshot is from a different device') return 'SERIAL_MISMATCH';
+  return 'INVALID_INPUT';
+}
 
 /** Failed checklist entries (key -> false) as human-readable item + the action to fix it. */
 function deriveFailedItems(checklist: Record<string, boolean> | undefined): FailedItem[] {
@@ -77,6 +89,11 @@ function failure(
   o: { title?: string; reason: string; items?: FailedItem[]; suggestion?: string },
 ): NextResponse {
   const items = o.items ?? [];
+  currentTrace()?.setOutcome(outcomeFor(status, o.title), status, {
+    title: o.title,
+    reason: o.reason,
+    failedChecks: items.map(i => i.check),
+  });
   return NextResponse.json({
     valid: false,
     matchesType: false,
@@ -101,11 +118,25 @@ function findRegisteredAccountRow(rows: TrackingMember[], account: string): Trac
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  const t = new SubmissionTrace(req);
+  const res = await runWithTrace(t, () => handle(req, t));
+  // Every path sets an outcome; this is only a safety net for a response that did not.
+  if (!t.doc.outcome) t.setOutcome(res.status >= 400 ? 'SERVER_ERROR' : 'ACCEPTED', res.status);
+  // Awaited (with a short timeout inside save) so the log is not lost when a serverless function freezes.
+  await t.save();
+  res.headers.set('X-Request-Id', t.requestId);
+  return res;
+}
+
+async function handle(req: NextRequest, t: SubmissionTrace): Promise<NextResponse> {
   try {
     const formData = await req.formData();
     const account = (formData.get('account') as string | null)?.trim();
     const submissionType = (formData.get('submissionType') as string | null)?.trim();
     const imageFile = formData.get('image') as File | null;
+    t.doc.account = account ?? null;
+    t.doc.submissionType = submissionType ?? null;
+    if (imageFile) t.doc.image = { originalName: imageFile.name, mimeType: imageFile.type, sizeBytes: imageFile.size };
 
     if (!account) return failure(400, {
       title: 'Account is missing',
@@ -138,6 +169,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Early account check: the account must be one the admin registered. Never create users from submissions.
     // Done before the AI call to save cost, and applies even when the tracking list is empty.
     const accountRow = findRegisteredAccountRow(trackingRows, account);
+    t.doc.registeredSerial = accountRow?.serial ?? null;
     if (!accountRow) {
       return failure(422, {
         title: 'User not found',
@@ -153,6 +185,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Read image bytes
     const arrayBuffer = await imageFile.arrayBuffer();
     const imageBytes = Buffer.from(arrayBuffer);
+    // Resolution matters when investigating misread serials (small screenshots are the usual cause).
+    try {
+      const meta = await sharp(imageBytes).metadata();
+      if (t.doc.image) Object.assign(t.doc.image, { width: meta.width, height: meta.height });
+    } catch { /* not an image: the validation below reports it */ }
 
     // Dual validation: MIME + magic bytes
     let ext: string;
@@ -187,9 +224,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     // AI validation
-    const aiResult = await validateImage(imageBytes, imageFile.type, submissionType);
+    const run = await runValidation(imageBytes, imageFile.type, submissionType, {
+      // Never shown to the model: only lets the validator re-read the serial once if it differs from this.
+      registeredSerial: accountRow.serial,
+    });
+    const aiResult = run.result;
     const confidence = Number(aiResult.confidence ?? 0);
     const decision = decide(aiResult);
+    t.setAi(run);
+    t.setDecision(decision);
 
     // Post-AI cross-validation: the serial in the image must be the one registered for THIS account.
     const extractedSerial = normalizeSerial(aiResult.deviceSerial);
@@ -260,6 +303,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         suggestion: aiResult.suggestion ?? 'Fix every item above, take a new screenshot, and submit again.',
       };
 
+      t.setOutcome('REJECTED', 200, {
+        title: rejectionResult.title,
+        reason: rejectionResult.reason,
+        failedChecks: rejectionResult.failedChecks,
+      });
       return NextResponse.json({
         account,
         submissionType,
@@ -272,6 +320,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const savedName = generateSavedName(account, submissionType, ext);
     await storeImage(imageBytes, savedName);
     const imageUrl = getPublicUrl(savedName);
+    if (t.doc.image) Object.assign(t.doc.image, { savedName, url: imageUrl });
 
     // Build and persist submission
     const failedChecks = aiResult.failedChecks ?? [];
@@ -335,9 +384,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     const saved = await save(submission);
+    t.doc.submissionId = saved.id;
+    t.setOutcome(decision.verdict === 'accept_warning' ? 'ACCEPTED_WARNING' : 'ACCEPTED', 200, {
+      reason: warnings.length ? warnings.join(' ') : undefined,
+    });
 
     updateTrackingExcel(submissionType, aiResult, account).catch(err =>
-      console.error('[submission] excel-update failed:', (err as Error).message)
+      trace.error('[submission] excel-update failed:', (err as Error).message)
     );
 
     return NextResponse.json({
@@ -352,6 +405,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   } catch (err) {
     console.error('Submission error:', err);
+    t.setError(err);
     return failure(500, {
       title: 'Something went wrong on the server',
       reason: 'The server hit an unexpected error while processing your submission. Your image was not saved.',
