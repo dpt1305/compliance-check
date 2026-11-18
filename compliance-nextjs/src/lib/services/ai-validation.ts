@@ -1,4 +1,5 @@
 import { buildImageCrops, type ImageCrop } from '@/lib/utils/image-crops';
+import { CONFIDENCE_CLEAN_FROM } from './validation-policy';
 
 export interface AiValidationResult {
   valid: boolean;
@@ -50,11 +51,14 @@ const COMMON_RULES = `GENERAL RULES (apply to every check)
 - DEVICE NAME: valid ONLY if the complete name is readable. Blacked-out, partly hidden, cut off or "..."-truncated names are false.
 - CONFIDENCE: use 99-100 only when every item is clearly and fully legible. Use 80-98 when every item passes but you were not completely sure about one or more of them, and list each one in "uncertainties" (one short sentence naming the item and why). Use below 80 when any item cannot be read reliably or is false. If any item is false, "valid" must be false.`;
 
+// SEED renamed the "Malware Alerts" tile to "Security Alerts"; both are the same counter.
+const SEED_TILE_NAMES = `The first counter tile is titled "Security Alerts" in current SEED versions and "Malware Alerts" in older ones - both are the same counter and both are acceptable; never fail the check because of which of the two names is shown. Small wording differences in tile titles (e.g. "Compliance Checks/Trellix", "OS") are also acceptable as long as four counter tiles with numbers are visible.`;
+
 const WINDOWS_PROMPT = `You are a compliance image validator for Windows device verification.
 
 The submitted screenshot MUST satisfy ALL of the following checks. Every single check must pass for valid=true.
 
-1. hasDashboard - SEED DASHBOARD: The SEED dashboard is clearly visible showing the device name, device serial number, and all 4 metric counters: Malware Alerts, Compliance Checks, SEED Configuration, and Operating System (any numeric values including 0 are acceptable).
+1. hasDashboard - SEED DASHBOARD: The SEED dashboard is clearly visible showing the device name, device serial number, and all 4 metric counters: Security Alerts, Compliance Checks, SEED Configuration, and Operating System (any numeric values including 0 are acceptable). ${SEED_TILE_NAMES}
 
 2. hasClock - SYSTEM CLOCK: The operating system's own clock (date and/or time) is visible on the Windows taskbar. See the SYSTEM CLOCK rule below.
 
@@ -68,7 +72,7 @@ ALL five checks must pass for valid=true. If even one fails, set valid=false and
 
 ALSO EXTRACT: deviceSerial, deviceName.
 SEED DASHBOARD COUNTERS: If hasDashboard=true, read the 4 numeric counter values from the SEED dashboard tiles and populate seedDashboard. Values MUST be plain integers (e.g. 4, 19, 0) - no units or labels.
-- malwareAlerts: integer shown in the "Malware Alerts" tile
+- malwareAlerts: integer shown in the "Security Alerts" tile (older SEED versions call it "Malware Alerts")
 - complianceChecks: integer shown in the "Compliance Checks" tile
 - seedConfiguration: integer shown in the "SEED Configuration" tile
 - operatingSystem: integer shown in the "Operating System" tile
@@ -88,7 +92,7 @@ IMPORTANT RULES - follow these strictly:
 - Do NOT validate or question the macOS version number (e.g. macOS 26, Tahoe, Sequoia - any version is acceptable).
 - Do NOT check for Trellix - it is not required.
 
-1. hasSeedDashboard - SEED DASHBOARD: The SEED dashboard is clearly visible showing the device name and all 4 metric counters: Malware Alerts, Compliance Checks, SEED Configuration, and Operating System (any numeric values including 0 are acceptable). Any device name or serial shown on the dashboard must be completely readable.
+1. hasSeedDashboard - SEED DASHBOARD: The SEED dashboard is clearly visible showing the device name and all 4 metric counters: Security Alerts, Compliance Checks, SEED Configuration, and Operating System (any numeric values including 0 are acceptable). ${SEED_TILE_NAMES} Any device name or serial shown on the dashboard must be completely readable.
 
 2. hasTimestamp - SYSTEM CLOCK: The operating system's own clock (date and/or time) is visible in the macOS menu bar. See the SYSTEM CLOCK rule below.
 
@@ -101,7 +105,7 @@ ALL four checks must pass for valid=true. If even one fails, set valid=false and
 ALSO EXTRACT: deviceName and deviceSerial.
 
 SEED DASHBOARD COUNTERS: If hasSeedDashboard=true, read the 4 numeric counter values from the SEED dashboard tiles and populate seedDashboard. Values MUST be plain integers (e.g. 4, 19, 0) - no units or labels.
-- malwareAlerts: integer shown in the "Malware Alerts" tile
+- malwareAlerts: integer shown in the "Security Alerts" tile (older SEED versions call it "Malware Alerts")
 - complianceChecks: integer shown in the "Compliance Checks" tile
 - seedConfiguration: integer shown in the "SEED Configuration" tile
 - operatingSystem: integer shown in the "Operating System" tile
@@ -226,6 +230,11 @@ export interface ValidationRun {
 export interface RunOptions {
   /** Send zoomed crops with the full image. Default true. */
   useCrops?: boolean;
+  /**
+   * The serial registered for the account. Never sent to the model: it only triggers an independent re-read when
+   * the extracted serial differs from it (see verifySerial).
+   */
+  registeredSerial?: string | null;
 }
 
 function getProviders(): AiProvider[] {
@@ -261,7 +270,7 @@ function getProviders(): AiProvider[] {
 }
 
 interface ChatCompletionResponse {
-  choices: [{ message: { content: string } }];
+  choices?: [{ message?: { content?: string | null }; finish_reason?: string }];
   usage?: {
     prompt_tokens?: number;
     completion_tokens?: number;
@@ -276,6 +285,7 @@ async function callProvider(
   mimeType: string,
   expectedType: string,
   crops: ImageCrop[] = [],
+  timeoutMs?: number,
 ): Promise<{ text: string; usage: TokenUsage | null }> {
   if (!provider.apiKey) throw new Error(`${provider.name} API key not configured`);
 
@@ -283,7 +293,7 @@ async function callProvider(
   const systemPrompt = selectPrompt(expectedType);
   const baseText = `Expected submission type: ${expectedType}. Validate this image.`;
   const userText = crops.length > 0
-    ? `${baseText}\n\nThe FIRST image is the full screenshot. The ${crops.length} images after it are zoomed, sharpened crops of the SAME screenshot (corners where clocks/timestamps usually are, and the central text area). Use them to read small text, dates and times; do not treat them as separate submissions.`
+    ? `${baseText}\n\nThe FIRST image is the full screenshot and is the one you judge. The ${crops.length} images after it are enlarged views of the SAME screenshot, left / middle / right parts that overlap each other (so the same text can appear in two of them): first a set with enhanced contrast, then a set in the original colours. Use them only to read small text, labels, numbers, dates and times more reliably; the full screenshot decides what is visible. Do not treat them as separate submissions.\n\nIMPORTANT: the edges of these enlarged views are artificial cuts, NOT edges of the screenshot or of a window. Text that is cut at the border of one enlarged view is NOT "cut off": find it whole in the full screenshot or in the overlapping neighbouring view before judging it. Never mark a serial number, device name or label as cut off, partly hidden or unreadable only because it touches the border of an enlarged view.`
     : baseText;
 
   const imageParts = [
@@ -294,34 +304,50 @@ async function callProvider(
     ]),
   ];
 
+  return postChat(provider, [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: [{ type: 'text', text: userText }, ...imageParts] },
+  ], timeoutMs);
+}
+
+/** One chat-completions round trip (shared by the main validation and the focused serial reads). */
+async function postChat(
+  provider: AiProvider,
+  messages: unknown[],
+  timeoutMs?: number,
+): Promise<{ text: string; usage: TokenUsage | null }> {
+  if (!provider.apiKey) throw new Error(`${provider.name} API key not configured`);
+
   const body = {
     model: provider.model,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: userText },
-          ...imageParts,
-        ],
-      },
-    ],
-    // The answer now carries per-item evidence, so it is longer than before.
-    max_tokens: 1024,
+    messages,
+    // The answer carries per-item evidence, so it is longer than a plain verdict. Reasoning models (gpt-5.x/6)
+    // also spend this budget on hidden reasoning tokens: too small a value leaves the visible reply EMPTY.
+    // Some newer models only accept `max_completion_tokens`, hence the configurable parameter name.
+    [process.env.AI_MAX_TOKENS_PARAM || 'max_tokens']: maxTokens(),
+    ...(process.env.AI_REASONING_EFFORT ? { reasoning_effort: process.env.AI_REASONING_EFFORT } : {}),
   };
 
   const url = provider.endpoint.endsWith('/v1/chat/completions')
     ? provider.endpoint
     : `${provider.endpoint}/v1/chat/completions`;
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${provider.apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${provider.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
+    });
+  } catch (err) {
+    const name = (err as Error).name;
+    if (name === 'TimeoutError' || name === 'AbortError') throw new Error(`${provider.name} timed out after ${timeoutMs}ms`);
+    throw err;
+  }
 
   if (!res.ok) {
     const text = await res.text();
@@ -329,7 +355,24 @@ async function callProvider(
     throw new Error(`${provider.name} API error ${res.status}: ${text}`);
   }
 
-  const data = await res.json() as ChatCompletionResponse;
+  // Read as text first: an empty/non-JSON body would otherwise surface as a cryptic "Unexpected end of JSON input".
+  const bodyText = await res.text();
+  let data: ChatCompletionResponse;
+  try {
+    data = JSON.parse(bodyText) as ChatCompletionResponse;
+  } catch {
+    throw new Error(`${provider.name} returned a non-JSON HTTP body (status ${res.status}): ${bodyText.slice(0, 300) || '<empty>'}`);
+  }
+  const choice = data.choices?.[0];
+  const content = choice?.message?.content;
+  if (!content || !content.trim()) {
+    const reasoning = data.usage?.completion_tokens_details?.reasoning_tokens;
+    throw new Error(
+      `${provider.name} returned an empty reply (finish_reason=${choice?.finish_reason ?? 'unknown'}, ` +
+      `completion_tokens=${data.usage?.completion_tokens ?? '?'}, reasoning_tokens=${reasoning ?? '?'}). ` +
+      `If finish_reason=length, raise AI_MAX_TOKENS or lower AI_REASONING_EFFORT.`,
+    );
+  }
   const u = data.usage;
   const usage: TokenUsage | null = u
     ? {
@@ -339,7 +382,12 @@ async function callProvider(
         reasoningTokens: u.completion_tokens_details?.reasoning_tokens ?? null,
       }
     : null;
-  return { text: data.choices[0].message.content, usage };
+  return { text: content, usage };
+}
+
+function maxTokens(): number {
+  const n = parseInt(process.env.AI_MAX_TOKENS ?? '', 10);
+  return Number.isFinite(n) && n > 0 ? n : 4096;
 }
 
 /** Attempts per provider when the reply is not valid JSON (1 try + 1 retry). */
@@ -357,6 +405,166 @@ function addUsage(a: TokenUsage | null, b: TokenUsage | null): TokenUsage | null
   };
 }
 
+const SERIAL_READ_PROMPT = `You are an OCR specialist. The images are the SAME screenshot: first the full image, then overlapping enlarged tiles of it (contrast-enhanced and original colours), so the same text may appear in two tiles. Find the device SERIAL NUMBER (next to a label such as "Serial", "Serial number", "Device serial", or the output of a serial command in a terminal) and transcribe it exactly.
+
+Method - follow it strictly:
+1. Locate the serial in the sharpest tile that shows it completely.
+2. Spell it ONE CHARACTER AT A TIME into "chars", left to right. Do not read it as a word and do not "correct" it.
+3. For each character decide letter vs digit from the glyph shape, not from what looks plausible:
+   - "5" has a flat top bar and a straight vertical stroke on its upper left; "S" is curved all the way through with no flat top.
+   - "0" (zero) is narrower and more oval than the round "O"; "1" has a flag/serif at the top, "I" is a plain bar, "l" is a tall plain bar.
+   - "8" has two closed loops; "B" has a straight vertical stroke on its left side. "2" has a flat base; "Z" has a flat top and base with a diagonal.
+4. Serial numbers are uppercase letters and digits only, with no spaces. If the value wraps onto two lines, join them.
+5. If ANY character cannot be told apart with certainty, list it in "ambiguous" (for example "position 1: 5 or S") and set "legible" to false. Never guess.
+6. If no serial number is visible, or it is blurred, masked, covered or cut off, return "serial": null and "legible": false. The border of an enlarged tile is an artificial cut, not the edge of the screenshot: if the serial touches a tile border, read it whole from the full image or the overlapping neighbouring tile instead of calling it cut off.
+
+Respond ONLY with JSON (no markdown):
+{"serial":"5CD346FHVH","chars":["5","C","D","3","4","6","F","H","V","H"],"legible":true,"ambiguous":[]}`;
+
+
+
+/** Focused serial re-reads run only when the serial from the main read does not equal the registered one. 0 = off. */
+function serialExtraReads(): number {
+  const n = parseInt(process.env.AI_SERIAL_VOTES ?? '1', 10);
+  return Number.isFinite(n) && n >= 0 ? n : 1;
+}
+
+function envMs(name: string, fallback: number): number {
+  const n = parseInt(process.env[name] ?? '', 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+function normSerialText(v: string | null | undefined): string {
+  return (v ?? '').replace(/[\s​]+/g, '').toUpperCase();
+}
+
+async function readSerialOnce(
+  provider: AiProvider,
+  imageBytes: Buffer,
+  mimeType: string,
+  tiles: ImageCrop[],
+  timeoutMs: number,
+): Promise<{ serial: string | null; usage: TokenUsage | null }> {
+  const content: unknown[] = [
+    { type: 'text', text: 'Read the device serial number from this screenshot.' },
+    { type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageBytes.toString('base64')}`, detail: 'high' } },
+    ...tiles.flatMap(t => [
+      { type: 'text', text: `Enlarged tile: ${t.label}` },
+      { type: 'image_url', image_url: { url: `data:${t.mimeType};base64,${t.bytes.toString('base64')}`, detail: 'high' } },
+    ]),
+  ];
+  const reply = await postChat(provider, [
+    { role: 'system', content: SERIAL_READ_PROMPT },
+    { role: 'user', content },
+  ], timeoutMs);
+  const parsed = JSON.parse(stripMarkdown(reply.text)) as { serial?: string | null; chars?: string[]; legible?: boolean };
+  // Prefer the character-by-character spelling when present: it is the more careful transcription.
+  const spelled = Array.isArray(parsed.chars) ? normSerialText(parsed.chars.join('')) : '';
+  const serial = normSerialText(spelled || parsed.serial);
+  if (parsed.legible === false || !serial) return { serial: null, usage: reply.usage };
+  return { serial, usage: reply.usage };
+}
+
+interface Reading {
+  result: AiValidationResult;
+  rawText: string;
+  usage: TokenUsage | null;
+}
+
+/** One full validation call. A malformed JSON reply is usually a one-off glitch, so it gets one more try. */
+async function readOnce(
+  provider: AiProvider,
+  imageBytes: Buffer,
+  mimeType: string,
+  expectedType: string,
+  crops: ImageCrop[],
+  timeoutMs: number,
+  canRetry: () => boolean,
+): Promise<Reading> {
+  let wasted: TokenUsage | null = null; // tokens burned by an earlier attempt that returned bad JSON
+  for (let attempt = 1; ; attempt++) {
+    let rawText = '';
+    let usage: TokenUsage | null = null;
+    try {
+      const reply = await callProvider(provider, imageBytes, mimeType, expectedType, crops, timeoutMs);
+      rawText = reply.text;
+      usage = reply.usage;
+      const result = JSON.parse(stripMarkdown(reply.text)) as AiValidationResult;
+      return { result, rawText, usage: addUsage(wasted, usage) };
+    } catch (err) {
+      if (err instanceof SyntaxError && attempt < MAX_JSON_ATTEMPTS && canRetry()) {
+        console.warn(`AI provider ${provider.name} bad JSON (attempt ${attempt}/${MAX_JSON_ATTEMPTS}) | raw reply: ${rawText.slice(0, 300)}`);
+        wasted = addUsage(wasted, usage);
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+/** Nothing to double-check: everything passed, fully confident, and a serial was read. */
+function isCleanPass(r: AiValidationResult): boolean {
+  const checks = Object.values(r.checklist ?? {});
+  return (
+    r.valid === true &&
+    r.matchesType === true &&
+    checks.every(Boolean) &&
+    Number(r.confidence) >= CONFIDENCE_CLEAN_FROM &&
+    !!normSerialText(r.deviceSerial)
+  );
+}
+
+/**
+ * The comparison against the registered serial stays strictly equal (done by the caller). This only decides
+ * whether the extracted value deserves a second, independent look BEFORE it is compared:
+ *  - it already equals the registered serial -> verified, nothing more to do (the usual, fast path)
+ *  - it differs -> one focused re-read (character-by-character, enlarged tiles). The registered serial is never
+ *    shown to the model, so it cannot be nudged towards it.
+ *      re-read equals the registered serial -> the first read was a one-off misread; use the re-read
+ *      re-read equals the first read         -> two independent reads agree on a different serial: another device
+ *      re-read gives a third value / nothing -> unreliable: no serial, so the user is asked for a clearer image
+ */
+async function verifySerial(
+  provider: AiProvider,
+  result: AiValidationResult,
+  registeredSerial: string,
+  imageBytes: Buffer,
+  mimeType: string,
+  crops: ImageCrop[],
+  timeoutMs: number,
+): Promise<TokenUsage | null> {
+  const read = normSerialText(result.deviceSerial);
+  const registered = normSerialText(registeredSerial);
+  if (!read || !registered || read === registered) return null;
+
+  let usage: TokenUsage | null = null;
+  try {
+    const again = await readSerialOnce(provider, imageBytes, mimeType, crops, timeoutMs);
+    usage = again.usage;
+    if (again.serial === registered) {
+      console.info(`[ai-validation] serial re-read corrected "${read}" -> "${again.serial}"`);
+      result.serialsSeen = (result.serialsSeen ?? []).map(s => (normSerialText(s) === read ? registered : s));
+      result.deviceSerial = registered;
+    } else if (again.serial === read) {
+      console.info(`[ai-validation] serial confirmed by re-read: "${read}" (registered differs)`);
+    } else if (!again.serial) {
+      // The strict focused read could not decide (unreadable / a character in doubt). That is no evidence against the
+      // first read, so keep it: the strict comparison with the registered serial still decides, nothing is accepted.
+      console.warn(`[ai-validation] serial re-read inconclusive, keeping first read "${read}"`);
+    } else {
+      console.warn(`[ai-validation] serial reads disagree: "${read}" vs "${again.serial}"`);
+      result.uncertainties = [
+        ...(result.uncertainties ?? []),
+        `The serial number was read differently each time (${[read, again.serial ?? 'unreadable'].join(' / ')}).`,
+      ];
+      result.deviceSerial = null;
+    }
+  } catch (err) {
+    console.warn(`[ai-validation] serial re-read skipped: ${(err as Error).message}`);
+  }
+  return usage;
+}
+
 /** Full-detail validation: result plus timing, tokens, provider and raw reply. */
 export async function runValidation(
   imageBytes: Buffer,
@@ -368,11 +576,20 @@ export async function runValidation(
   const providers = getProviders();
   const attempts: ProviderAttempt[] = [];
 
+  // Hard time budget: the hosting platform kills the request at maxDuration (60 s on Vercel Hobby), so every call
+  // gets the smaller of its own timeout and what is left, and extra reads are skipped once time is short.
+  const totalBudget = envMs('AI_TOTAL_BUDGET_MS', 50_000);
+  const escalateBefore = envMs('AI_ESCALATE_BEFORE_MS', 28_000);
+  const requestTimeout = envMs('AI_REQUEST_TIMEOUT_MS', 30_000);
+  const elapsed = () => Date.now() - started;
+  const callTimeout = () => Math.min(requestTimeout, totalBudget - elapsed());
+  const canEscalate = () => elapsed() < escalateBefore;
+
   const failedRun = (reason: string, cropCount: number): ValidationRun => ({
     result: { valid: false, matchesType: false, confidence: 0, reason },
     provider: null,
     model: null,
-    durationMs: Date.now() - started,
+    durationMs: elapsed(),
     usage: null,
     cropCount,
     rawText: null,
@@ -381,56 +598,69 @@ export async function runValidation(
 
   if (providers.length === 0) return failedRun('No AI providers configured', 0);
 
-  // Built once and reused if we have to fall back to another provider.
-  const crops = options.useCrops === false ? [] : await buildImageCrops(imageBytes);
+  // Built once and reused by every call/provider.
+  // AI_USE_CROPS=false: send only the original image (one call, no extra tiles).
+  const useCrops = options.useCrops !== false && process.env.AI_USE_CROPS !== 'false';
+  const crops = useCrops ? await buildImageCrops(imageBytes) : [];
+  // Pass 1 stays light (full image + 3 enlarged original-colour tiles). The contrast tiles only join if needed.
+  const leanCrops = crops.filter(c => c.kind === 'zoom');
 
   for (const provider of providers) {
-    // A malformed JSON reply is usually a one-off glitch, so the same provider gets one more try.
-    // Network/HTTP errors (rate limit, 5xx) are not retried here: they fall through to the next provider.
-    let wastedUsage: TokenUsage | null = null; // tokens burned by earlier attempts that returned bad JSON
-    for (let attempt = 1; attempt <= MAX_JSON_ATTEMPTS; attempt++) {
-      const t0 = Date.now();
-      let rawText: string | null = null;
-      let usage: TokenUsage | null = null;
-      try {
-        const reply = await callProvider(provider, imageBytes, mimeType, expectedType, crops);
-        rawText = reply.text;
-        usage = reply.usage;
-        const result = JSON.parse(stripMarkdown(reply.text)) as AiValidationResult;
-        attempts.push({ provider: provider.name, model: provider.model, ok: true, durationMs: Date.now() - t0 });
+    if (callTimeout() < 5_000) break; // not enough time left for another provider
+    const t0 = Date.now();
+    try {
+      const p1 = await readOnce(provider, imageBytes, mimeType, expectedType, leanCrops, callTimeout(), canEscalate);
+      let result = p1.result;
+      let usage = p1.usage;
+      let rawText = p1.rawText;
+      let readings = 1;
 
-        const failedKeys = Object.entries(result.checklist ?? {}).filter(([, ok]) => !ok).map(([k]) => k);
-        console.info(
-          `[ai-validation] ${provider.name}/${provider.model} type=${expectedType} crops=${crops.length} ` +
-          `attempt=${attempt} ${Date.now() - t0}ms confidence=${result.confidence} valid=${result.valid} ` +
-          `failed=[${failedKeys.join(',')}] uncertainties=${JSON.stringify(result.uncertainties ?? [])} ` +
-          `reason=${JSON.stringify(result.reason)}`,
-        );
-
-        return {
-          result,
-          provider: provider.name,
-          model: provider.model,
-          durationMs: Date.now() - started,
-          usage: addUsage(wastedUsage, usage),
-          cropCount: crops.length,
-          rawText,
-          attempts,
-        };
-      } catch (err) {
-        const message = (err as Error).message;
-        const badJson = err instanceof SyntaxError;
-        attempts.push({ provider: provider.name, model: provider.model, ok: false, error: message, durationMs: Date.now() - t0 });
-        console.warn(
-          `AI provider ${provider.name} failed (attempt ${attempt}/${MAX_JSON_ATTEMPTS}):`, message,
-          rawText ? `| raw reply: ${rawText.slice(0, 300)}` : '',
-        );
-        if (badJson && attempt < MAX_JSON_ATTEMPTS) {
-          wastedUsage = addUsage(wastedUsage, usage);
-          continue; // retry the same provider once
+      // Something is missing or uncertain: ONE more look with everything (contrast + enlarged tiles). It sees
+      // strictly more than pass 1, so its answer replaces it.
+      if (!isCleanPass(result) && crops.length > leanCrops.length && canEscalate() && callTimeout() > 5_000) {
+        try {
+          const p2 = await readOnce(provider, imageBytes, mimeType, expectedType, crops, callTimeout(), () => false);
+          result = p2.result;
+          usage = addUsage(usage, p2.usage);
+          rawText = `${rawText}\n---\n${p2.rawText}`;
+          readings = 2;
+        } catch (err) {
+          console.warn(`[ai-validation] second look failed, keeping the first reading: ${(err as Error).message}`);
         }
-        break; // give up on this provider, try the next one
       }
+
+      // Serial differs from the registered one: one independent focused re-read before the strict comparison.
+      if (options.registeredSerial && serialExtraReads() > 0 && canEscalate() && callTimeout() > 5_000) {
+        usage = addUsage(
+          usage,
+          await verifySerial(provider, result, options.registeredSerial, imageBytes, mimeType, crops, callTimeout()),
+        );
+      }
+
+      attempts.push({ provider: provider.name, model: provider.model, ok: true, durationMs: Date.now() - t0 });
+      const failedKeys = Object.entries(result.checklist ?? {}).filter(([, ok]) => !ok).map(([k]) => k);
+      console.info(
+        `[ai-validation] ${provider.name}/${provider.model} type=${expectedType} tiles=${leanCrops.length}${readings > 1 ? `+${crops.length - leanCrops.length}` : ''} ` +
+        `readings=${readings} ${Date.now() - t0}ms confidence=${result.confidence} valid=${result.valid} ` +
+        `serial=${JSON.stringify(result.deviceSerial ?? null)} seen=${JSON.stringify(result.serialsSeen ?? [])} ` +
+        `failed=[${failedKeys.join(',')}] uncertainties=${JSON.stringify(result.uncertainties ?? [])} ` +
+        `reason=${JSON.stringify(result.reason)}`,
+      );
+
+      return {
+        result,
+        provider: provider.name,
+        model: provider.model,
+        durationMs: elapsed(),
+        usage,
+        cropCount: readings > 1 ? crops.length : leanCrops.length,
+        rawText,
+        attempts,
+      };
+    } catch (err) {
+      // Network/HTTP errors (rate limit, 5xx, timeout) are not retried here: they fall through to the next provider.
+      attempts.push({ provider: provider.name, model: provider.model, ok: false, error: (err as Error).message, durationMs: Date.now() - t0 });
+      console.warn(`AI provider ${provider.name} failed:`, (err as Error).message);
     }
   }
 
@@ -440,7 +670,8 @@ export async function runValidation(
 export async function validateImage(
   imageBytes: Buffer,
   mimeType: string,
-  expectedType: string
+  expectedType: string,
+  options: RunOptions = {},
 ): Promise<AiValidationResult> {
-  return (await runValidation(imageBytes, mimeType, expectedType)).result;
+  return (await runValidation(imageBytes, mimeType, expectedType, options)).result;
 }

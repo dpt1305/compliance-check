@@ -8,7 +8,7 @@ interface GuidanceItem {
 }
 
 const WINDOWS_CHECKLIST: GuidanceItem[] = [
-  { title: 'SEED Dashboard', description: 'SEED dashboard visible showing device name, serial number, and 4+ metric counters (Malware Alerts, Compliance Checks, SEED Configuration, Operating System)', icon: '📊', required: true },
+  { title: 'SEED Dashboard', description: 'SEED dashboard visible showing device name, serial number, and 4+ metric counters (Security Alerts, Compliance Checks, SEED Configuration, Operating System)', icon: '📊', required: true },
   { title: 'System Clock', description: "The operating system's own date/time visible on the Windows taskbar (usually bottom-right, but any position is fine). Dates inside web pages do not count", icon: '🕐', required: true },
   { title: 'Windows Update Status', description: "Windows Update screen showing \"You're up to date\"", icon: '🔄', required: true },
   { title: 'Device Name', description: 'Computer hostname completely readable anywhere on screen (not masked, blacked-out, cut off or truncated)', icon: '💻', required: true },
@@ -16,7 +16,7 @@ const WINDOWS_CHECKLIST: GuidanceItem[] = [
 ];
 
 const MAC_CHECKLIST: GuidanceItem[] = [
-  { title: 'SEED Dashboard', description: 'SEED dashboard visible showing device name, serial number, and 4+ metric counters (Malware Alerts, Compliance Checks, SEED Configuration, Operating System)', icon: '📊', required: true },
+  { title: 'SEED Dashboard', description: 'SEED dashboard visible showing device name, serial number, and 4+ metric counters (Security Alerts, Compliance Checks, SEED Configuration, Operating System)', icon: '📊', required: true },
   { title: 'System Clock', description: "The operating system's own date/time visible in the macOS menu bar (usually top-right, but any position is fine). Dates inside web pages do not count", icon: '🕐', required: true },
   { title: 'Mac System Info', description: 'System Settings > General > About (or Apple menu > About This Mac) showing the model name and the complete serial number', icon: 'ℹ️', required: true },
   { title: 'Device Serial Number', description: 'Complete serial number readable (not masked, blacked-out, cut off or truncated); every serial shown in the screenshot must be identical and match your registered device', icon: '#️⃣', required: true },
@@ -96,7 +96,7 @@ export default function ValidationGuidance({ submissionType }: Props) {
           {type === 'windows' && (
             <>
               <li><strong>SEED dashboard is required</strong> — open the SEED app and capture the dashboard showing all 4 metric counters</li>
-              <li>The SEED dashboard should display device name, serial number, Malware Alerts, Compliance Checks, SEED Configuration, and Operating System counters</li>
+              <li>The SEED dashboard should display device name, serial number, Security Alerts, Compliance Checks, SEED Configuration, and Operating System counters</li>
               <li>Make sure device name and serial are <strong>completely visible</strong> — masked, blacked-out, blurred or cut-off values (including &quot;...&quot;) are rejected</li>
               <li>Keep the <strong>Windows taskbar</strong> in the screenshot so the system clock is readable (dates inside web pages do not count)</li>
               <li>You can capture multiple windows or tabs if needed to show all required elements</li>

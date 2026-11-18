@@ -42,7 +42,7 @@ const CHECKLIST_GUIDES: Record<string, string> = {
   hasWindowsUpdate:    'Open Settings > Windows Update, install any pending updates and restart, then screenshot the page showing "You\'re up to date".',
   hasDeviceName:       'Make sure the complete device name is visible: not masked, blacked-out, cut off or covered by another window (Settings > System > About, or the SEED page).',
   hasDeviceSerial:     'Make sure the complete serial number is visible: not masked, blurred, cut off or covered by another window.',
-  hasDashboard:        'Open the SEED dashboard and capture it in full so all four counters (Malware Alerts, Compliance Checks, SEED Configuration, Operating System) are readable.',
+  hasDashboard:        'Open the SEED dashboard and capture it in full so all four counters (Security Alerts, Compliance Checks, SEED Configuration, Operating System) are readable.',
   hasTrellix:          'Open Trellix and capture the window showing the status "ok" / "turned on". If it is off or shows a warning, fix that first and then retake the screenshot.',
   hasSeedDashboard:    'Open the SEED dashboard and capture it with the device name, serial number and all counters visible.',
   hasTimestamp:        'Include the macOS menu bar so the system clock is readable. Dates inside web pages (for example a page footer) do not count.',
@@ -187,7 +187,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     // AI validation
-    const aiResult = await validateImage(imageBytes, imageFile.type, submissionType);
+    const aiResult = await validateImage(imageBytes, imageFile.type, submissionType, {
+      // Never shown to the model: only lets the validator re-read the serial once if it differs from this.
+      registeredSerial: accountRow.serial,
+    });
     const confidence = Number(aiResult.confidence ?? 0);
     const decision = decide(aiResult);
 
