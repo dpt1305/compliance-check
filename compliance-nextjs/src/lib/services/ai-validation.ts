@@ -1,5 +1,6 @@
 import { buildImageCrops, type ImageCrop } from '@/lib/utils/image-crops';
 import { CONFIDENCE_CLEAN_FROM } from './validation-policy';
+import { trace } from './submission-log';
 
 export interface AiValidationResult {
   valid: boolean;
@@ -493,7 +494,7 @@ async function readOnce(
       return { result, rawText, usage: addUsage(wasted, usage) };
     } catch (err) {
       if (err instanceof SyntaxError && attempt < MAX_JSON_ATTEMPTS && canRetry()) {
-        console.warn(`AI provider ${provider.name} bad JSON (attempt ${attempt}/${MAX_JSON_ATTEMPTS}) | raw reply: ${rawText.slice(0, 300)}`);
+        trace.warn(`AI provider ${provider.name} bad JSON (attempt ${attempt}/${MAX_JSON_ATTEMPTS}) | raw reply: ${rawText.slice(0, 300)}`);
         wasted = addUsage(wasted, usage);
         continue;
       }
@@ -542,17 +543,17 @@ async function verifySerial(
     const again = await readSerialOnce(provider, imageBytes, mimeType, crops, timeoutMs);
     usage = again.usage;
     if (again.serial === registered) {
-      console.info(`[ai-validation] serial re-read corrected "${read}" -> "${again.serial}"`);
+      trace.info(`[ai-validation] serial re-read corrected "${read}" -> "${again.serial}"`);
       result.serialsSeen = (result.serialsSeen ?? []).map(s => (normSerialText(s) === read ? registered : s));
       result.deviceSerial = registered;
     } else if (again.serial === read) {
-      console.info(`[ai-validation] serial confirmed by re-read: "${read}" (registered differs)`);
+      trace.info(`[ai-validation] serial confirmed by re-read: "${read}" (registered differs)`);
     } else if (!again.serial) {
       // The strict focused read could not decide (unreadable / a character in doubt). That is no evidence against the
       // first read, so keep it: the strict comparison with the registered serial still decides, nothing is accepted.
-      console.warn(`[ai-validation] serial re-read inconclusive, keeping first read "${read}"`);
+      trace.warn(`[ai-validation] serial re-read inconclusive, keeping first read "${read}"`);
     } else {
-      console.warn(`[ai-validation] serial reads disagree: "${read}" vs "${again.serial}"`);
+      trace.warn(`[ai-validation] serial reads disagree: "${read}" vs "${again.serial}"`);
       result.uncertainties = [
         ...(result.uncertainties ?? []),
         `The serial number was read differently each time (${[read, again.serial ?? 'unreadable'].join(' / ')}).`,
@@ -560,7 +561,7 @@ async function verifySerial(
       result.deviceSerial = null;
     }
   } catch (err) {
-    console.warn(`[ai-validation] serial re-read skipped: ${(err as Error).message}`);
+    trace.warn(`[ai-validation] serial re-read skipped: ${(err as Error).message}`);
   }
   return usage;
 }
@@ -618,6 +619,13 @@ export async function runValidation(
       // Something is missing or uncertain: ONE more look with everything (contrast + enlarged tiles). It sees
       // strictly more than pass 1, so its answer replaces it.
       if (!isCleanPass(result) && crops.length > leanCrops.length && canEscalate() && callTimeout() > 5_000) {
+        // Pass 1 is replaced below; keep what it said so a log reader can see why the second look happened.
+        trace.info(
+          `[ai-validation] pass 1 not clean, escalating: confidence=${result.confidence} valid=${result.valid} ` +
+          `serial=${JSON.stringify(result.deviceSerial ?? null)} ` +
+          `failed=[${Object.entries(result.checklist ?? {}).filter(([, ok]) => !ok).map(([k]) => k).join(',')}] ` +
+          `uncertainties=${JSON.stringify(result.uncertainties ?? [])}`,
+        );
         try {
           const p2 = await readOnce(provider, imageBytes, mimeType, expectedType, crops, callTimeout(), () => false);
           result = p2.result;
@@ -625,7 +633,7 @@ export async function runValidation(
           rawText = `${rawText}\n---\n${p2.rawText}`;
           readings = 2;
         } catch (err) {
-          console.warn(`[ai-validation] second look failed, keeping the first reading: ${(err as Error).message}`);
+          trace.warn(`[ai-validation] second look failed, keeping the first reading: ${(err as Error).message}`);
         }
       }
 
@@ -639,7 +647,7 @@ export async function runValidation(
 
       attempts.push({ provider: provider.name, model: provider.model, ok: true, durationMs: Date.now() - t0 });
       const failedKeys = Object.entries(result.checklist ?? {}).filter(([, ok]) => !ok).map(([k]) => k);
-      console.info(
+      trace.info(
         `[ai-validation] ${provider.name}/${provider.model} type=${expectedType} tiles=${leanCrops.length}${readings > 1 ? `+${crops.length - leanCrops.length}` : ''} ` +
         `readings=${readings} ${Date.now() - t0}ms confidence=${result.confidence} valid=${result.valid} ` +
         `serial=${JSON.stringify(result.deviceSerial ?? null)} seen=${JSON.stringify(result.serialsSeen ?? [])} ` +
@@ -660,7 +668,7 @@ export async function runValidation(
     } catch (err) {
       // Network/HTTP errors (rate limit, 5xx, timeout) are not retried here: they fall through to the next provider.
       attempts.push({ provider: provider.name, model: provider.model, ok: false, error: (err as Error).message, durationMs: Date.now() - t0 });
-      console.warn(`AI provider ${provider.name} failed:`, (err as Error).message);
+      trace.warn(`AI provider ${provider.name} failed:`, (err as Error).message);
     }
   }
 

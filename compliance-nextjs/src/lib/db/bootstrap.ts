@@ -36,11 +36,13 @@ async function bootstrapMongo(): Promise<void> {
     { ensureIndexes: ensureAdminIndexes },
     { ensureIndexes: ensureTrackingIndexes },
     { ensureIndexes: ensureAttendanceIndexes },
+    { ensureIndexes: ensureSubmissionLogIndexes },
   ] = await Promise.all([
     import('./mongo/submission-repo'),
     import('./mongo/admin-repo'),
     import('./mongo/tracking-repo'),
     import('./mongo/attendance-repo'),
+    import('./mongo/submission-log-repo'),
   ]);
 
   await Promise.all([
@@ -48,6 +50,7 @@ async function bootstrapMongo(): Promise<void> {
     ensureAdminIndexes(),
     ensureTrackingIndexes(),
     ensureAttendanceIndexes(),
+    ensureSubmissionLogIndexes(),
   ]);
 
   await initDefaultAdmin();

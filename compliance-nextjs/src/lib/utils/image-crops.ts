@@ -1,4 +1,5 @@
 import sharp from 'sharp';
+import { trace } from '@/lib/services/submission-log';
 
 export interface ImageCrop {
   /** Human-readable description given to the AI so it knows what the crop shows. */
@@ -63,7 +64,7 @@ export async function buildImageCrops(imageBytes: Buffer): Promise<ImageCrop[]> 
     ];
     return await Promise.all(jobs.map(job => job()));
   } catch (err) {
-    console.warn('[image-crops] Failed to build crops, using full image only:', (err as Error).message);
+    trace.warn('[image-crops] Failed to build crops, using full image only:', (err as Error).message);
     return [];
   }
 }
